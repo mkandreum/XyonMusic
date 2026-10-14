@@ -1,0 +1,16 @@
+# Gradle / Android
+.gradle/
+build/
+app/build/
+local.properties
+*.hprof
+# Keystore local (no subir claves). Para firmar tu release crea tu
+# release.keystore + keystore.properties (ver FALLOS_Y_FIXES.md).
+*.keystore
+keystore.properties
+# APKs pesados generados
+app/build/outputs/
+# OS / IDE
+.DS_Store
+.idea/
+*.iml
