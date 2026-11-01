@@ -10,6 +10,10 @@ on:
         description: "Versión a publicar (p. ej. v2.0)"
         required: false
         default: ""
+      source_ref:
+        description: "Commit/tag a compilar (vacío = el actual)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -19,6 +23,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.sha }}
+      - name: Firma instalable en versiones antiguas
+        if: inputs.source_ref != ''
+        run: |
+          sed -i 's/if (keystoreProps.containsKey("storeFile")) signingConfig = signingConfigs.getByName("release")/signingConfig = signingConfigs.getByName(if (keystoreProps.containsKey("storeFile")) "release" else "debug")/' app/build.gradle.kts
+          grep -q "suppressUnsupportedCompileSdk" gradle.properties || echo "android.suppressUnsupportedCompileSdk=35" >> gradle.properties
+          grep -n signingConfig app/build.gradle.kts
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -59,7 +71,8 @@ jobs:
         with:
           tag_name: ${{ env.REL_TAG != '' && env.REL_TAG || format('build-{0}', github.run_number) }}
           name: ${{ env.REL_TAG != '' && format('XyonMusic {0}', env.REL_TAG) || format('XyonMusic build {0} (R8)', github.run_number) }}
-          body_path: ${{ env.REL_TAG != '' && 'RELEASE_NOTES.md' || '' }}
+          body_path: ${{ env.REL_TAG != '' && inputs.source_ref == '' && 'RELEASE_NOTES.md' || '' }}
           make_latest: ${{ env.REL_TAG != '' }}
           target_commitish: ${{ github.sha }}
+          body: ${{ inputs.source_ref != '' && format('APK compilado desde {0} sin cambios de código (solo firma instalable).', inputs.source_ref) || '' }}
           files: XyonMusic-*-r8.apk
