@@ -17,7 +17,6 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - uses: android-actions/setup-android@v3
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
@@ -32,6 +31,8 @@ jobs:
           echo "$KEYSTORE_BASE64" | base64 -d > release.keystore
           printf "storeFile=release.keystore\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n" "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > keystore.properties
       - name: Assemble release (R8)
+        env:
+          ANDROID_HOME: /usr/local/lib/android/sdk
         run: gradle :app:assembleRelease --stacktrace
       - name: Rename APK
         run: cp app/build/outputs/apk/release/app-release.apk XyonMusic-${{ github.run_number }}-r8.apk
