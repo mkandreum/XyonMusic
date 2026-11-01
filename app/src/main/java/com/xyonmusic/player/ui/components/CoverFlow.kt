@@ -33,6 +33,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.xyonmusic.player.data.Album
+import com.xyonmusic.player.spotify.SpTrack
+import coil.compose.AsyncImage
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.rounded.Favorite
 import com.xyonmusic.player.ui.theme.LocalXyon
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -46,11 +51,28 @@ import kotlin.math.sign
  *  - vertical (retrato): mejorado: portadas separadas sin solaparse los textos, inclinación
  *    más suave y un único título fijo bajo la portada central.
  */
+/** Álbum de Spotify formado con tus "Canciones que te gustan". */
+data class SpAlbum(val name: String, val artist: String, val uri: String?, val image: String?, val tracks: List<SpTrack>)
+
+fun spotifyAlbums(liked: List<SpTrack>): List<SpAlbum> =
+    liked.groupBy { it.albumUri ?: it.albumName ?: it.uri }.values.map { t ->
+        val f = t.first()
+        SpAlbum(f.albumName ?: f.name, f.artist, f.albumUri, f.image, t)
+    }
+
+/** Elemento del CoverFlow: un álbum local o un álbum de Spotify. */
+data class FlowItem(val key: String, val title: String, val subtitle: String?, val count: Int, val localArt: String?, val remoteArt: String?, val album: Album? = null, val spotify: SpAlbum? = null)
+
+fun flowItems(local: List<Album>, sp: List<SpAlbum>): List<FlowItem> =
+    (local.map { FlowItem("l:" + it.name, it.name, it.artist, it.songs.size, it.artUri, null, album = it) } +
+        sp.map { FlowItem("s:" + (it.uri ?: it.name), it.name, it.artist, it.tracks.size, null, it.image, spotify = it) })
+        .sortedBy { it.title.lowercase() }
+
 @Composable
 fun CoverFlow(
-    albums: List<Album>,
+    albums: List<FlowItem>,
     vertical: Boolean,
-    onOpen: (Album) -> Unit,
+    onOpen: (FlowItem) -> Unit,
     modifier: Modifier = Modifier,
     bottomPadding: Dp = 0.dp
 ) {
@@ -103,7 +125,7 @@ fun CoverFlow(
                 val d = i - p
                 val ad = abs(d)
                 if (vertical && ad > 2.3f) continue
-                key(a.name + i) {
+                key(a.key) {
                     Column(
                         Modifier
                             .zIndex(-ad)
@@ -136,15 +158,20 @@ fun CoverFlow(
                                     if (i == centered) onOpen(a) else scope.launch { pos.animateTo(i.toFloat(), spring(dampingRatio = 0.85f, stiffness = 200f)) }
                                 }
                         ) {
-                            Art(a.artUri, Modifier.fillMaxSize())
+                            if (a.remoteArt != null) AsyncImage(a.remoteArt, null, Modifier.fillMaxSize().background(c.placeholder), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                            else Art(a.localArt, Modifier.fillMaxSize())
+                            if (a.spotify != null) Box(
+                                Modifier.align(Alignment.TopEnd).padding(10.dp).size(24.dp).clip(CircleShape).background(Color(0xFF1ED760)),
+                                contentAlignment = Alignment.Center
+                            ) { Icon(Icons.Rounded.Favorite, "Spotify", Modifier.size(13.dp), tint = Color.Black) }
                             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = minOf(ad, 1f) * (if (vertical) 0.45f else 0.35f))))
                         }
                         if (!vertical) {
                             // Título por portada como en la original (se desvanece rápido)
                             Spacer(Modifier.height(14.dp))
                             val ta = (1f - ad * 2f).coerceIn(0f, 1f)
-                            Text(a.name, Modifier.width(cover).graphicsLayer { alpha = ta }, color = c.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(a.artist ?: "", Modifier.width(cover).graphicsLayer { alpha = ta }, color = c.text2, fontSize = 13.sp, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(a.title, Modifier.width(cover).graphicsLayer { alpha = ta }, color = c.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(a.subtitle ?: "", Modifier.width(cover).graphicsLayer { alpha = ta }, color = c.text2, fontSize = 13.sp, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }
@@ -159,8 +186,8 @@ fun CoverFlow(
                     modifier = Modifier.align(Alignment.TopCenter).offset(y = centerY + cover / 2 + 10.dp).fillMaxWidth()
                 ) { al ->
                     Column(Modifier.fillMaxWidth().padding(horizontal = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(al.name, color = c.text, fontSize = 18.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(listOfNotNull(al.artist, "${al.songs.size} canciones").joinToString(" · "), color = c.text2, fontSize = 13.sp, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(al.title, color = c.text, fontSize = 18.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(listOfNotNull(al.subtitle, "${al.count} canciones", if (al.spotify != null) "Spotify" else null).joinToString(" · "), color = if (al.spotify != null) Color(0xFF1ED760) else c.text2, fontSize = 13.sp, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
             }

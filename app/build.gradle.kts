@@ -20,8 +20,8 @@ android {
         applicationId = "com.xyonmusic.player"
         minSdk = 26
         targetSdk = 34
-        versionCode = 4
-        versionName = "2.1"
+        versionCode = 5
+        versionName = "2.2"
 
         vectorDrawables { useSupportLibrary = true }
     }
@@ -76,4 +76,7 @@ dependencies {
     implementation(libs.datastore.preferences)
     implementation(libs.coil.compose)
     implementation(libs.androidx.palette)
+    // SDK oficial de Spotify (App Remote, Apache 2.0) para controlar Spotify sin salir de la app
+    implementation(files("libs/spotify-app-remote-release-0.8.0.aar"))
+    implementation("com.google.code.gson:gson:2.11.0")
 }

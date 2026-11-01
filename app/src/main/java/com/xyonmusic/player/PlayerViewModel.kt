@@ -21,6 +21,7 @@ import com.xyonmusic.player.spotify.SpNow
 import com.xyonmusic.player.spotify.SpTrack
 import com.xyonmusic.player.spotify.SpUser
 import com.xyonmusic.player.spotify.Spotify
+import com.xyonmusic.player.spotify.SpotifyRemote
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -84,6 +85,11 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     val forYou: StateFlow<ForYou?> = _forYou.asStateFlow()
 
     val spotify = Spotify(app)
+    /** Control de la app de Spotify (SDK App Remote) para reproducir sin salir de XyonMusic. */
+    val remote = SpotifyRemote(app)
+    enum class Source { LOCAL, SPOTIFY }
+    private val _source = MutableStateFlow(Source.LOCAL)
+    val source: StateFlow<Source> = _source.asStateFlow()
     private val _sp = MutableStateFlow(SpotifyUiState())
     val sp: StateFlow<SpotifyUiState> = _sp.asStateFlow()
 
@@ -94,7 +100,13 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             loaded = prefs.getString("folder", null) == null
         )
         _sp.value = SpotifyUiState(connected = spotify.connected, clientId = spotify.clientId, liked = if (spotify.connected) loadLikedCache() else emptyList())
-        if (spotify.connected) refreshSpotify()
+        if (spotify.connected) {
+            refreshSpotify()
+            // Reconectar en silencio con la app de Spotify si ya se autorizó antes.
+            if (prefs.getBoolean("sp_remote_ok", false)) viewModelScope.launch {
+                if (remote.connect(spotify.clientId, showAuth = false) == null && remote.state.value?.paused == false) _source.value = Source.SPOTIFY
+            }
+        }
         connect()
         prefs.getString("folder", null)?.let { scan(Uri.parse(it)) }
 
@@ -118,7 +130,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch {
             while (isActive) {
-                if (spotify.connected) _sp.value = _sp.value.copy(now = runCatching { spotify.nowPlaying() }.getOrNull())
+                if (spotify.connected && !remote.connected) _sp.value = _sp.value.copy(now = runCatching { spotify.nowPlaying() }.getOrNull())
                 delay(if (_sp.value.now?.playing == true) 4000 else 10000)
             }
         }
@@ -194,7 +206,9 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         c.shuffleModeEnabled = false
         c.prepare(); c.play()
         _player.value = _player.value.copy(queue = list, index = i, playing = true)
-        if (_sp.value.now?.playing == true) viewModelScope.launch { spotify.control("pause") }
+        if (_source.value == Source.SPOTIFY && remote.connected) remote.pause()
+        else if (_sp.value.now?.playing == true) viewModelScope.launch { spotify.control("pause") }
+        _source.value = Source.LOCAL
     }
 
     fun shuffleAll(list: List<Song>) {
@@ -291,15 +305,15 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     // Caché local de "Canciones que te gustan" (aparece al instante y sin conexión)
     private fun saveLikedCache(l: List<SpTrack>) {
         val a = JSONArray()
-        l.forEach { a.put(JSONObject().put("u", it.uri).put("n", it.name).put("a", it.artist).put("i", it.image ?: "").put("d", it.durationMs)) }
+        l.forEach { a.put(JSONObject().put("u", it.uri).put("n", it.name).put("a", it.artist).put("i", it.image ?: "").put("d", it.durationMs).put("an", it.albumName ?: "").put("au", it.albumUri ?: "")) }
         prefs.edit().putString("sp_liked", a.toString()).apply()
     }
     private fun loadLikedCache(): List<SpTrack> = runCatching {
         val a = JSONArray(prefs.getString("sp_liked", "[]"))
-        (0 until a.length()).map { a.getJSONObject(it) }.map { SpTrack(it.getString("u"), it.getString("n"), it.getString("a"), it.getString("i").ifEmpty { null }, it.getLong("d")) }
+        (0 until a.length()).map { a.getJSONObject(it) }.map { SpTrack(it.getString("u"), it.getString("n"), it.getString("a"), it.getString("i").ifEmpty { null }, it.getLong("d"), it.optString("an").ifEmpty { null }, it.optString("au").ifEmpty { null }) }
     }.getOrDefault(emptyList())
 
-    fun disconnectSpotify() { prefs.edit().remove("sp_liked").apply(); spotify.disconnect(); _sp.value = SpotifyUiState(clientId = spotify.clientId, message = "Spotify desconectado") }
+    fun disconnectSpotify() { remote.disconnect(); _source.value = Source.LOCAL; prefs.edit().remove("sp_liked").remove("sp_remote_ok").apply(); spotify.disconnect(); _sp.value = SpotifyUiState(clientId = spotify.clientId, message = "Spotify desconectado") }
     fun refreshSpotify() = viewModelScope.launch {
         _sp.value = _sp.value.copy(loading = true, error = null)
         val user = runCatching { spotify.me() }
@@ -314,26 +328,61 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             }
         )
     }
+    /** Conecta con la app de Spotify (SDK). Devuelve true si se puede controlar desde XyonMusic. */
+    private suspend fun ensureRemote(): Boolean {
+        if (remote.connected) return true
+        if (!remote.installed) return false
+        val err = remote.connect(spotify.clientId, showAuth = true)
+        if (err == null) { prefs.edit().putBoolean("sp_remote_ok", true).apply(); return true }
+        _sp.value = _sp.value.copy(message = err)
+        return false
+    }
+
     fun playSpotify(tracks: List<SpTrack>, i: Int) = viewModelScope.launch {
         controller?.pause()
+        val t = tracks.getOrNull(i) ?: return@launch
+        if (ensureRemote()) {
+            _source.value = Source.SPOTIFY
+            val ctxUri = _sp.value.user?.id?.let { "spotify:user:$it:collection" }
+            remote.playInContext(ctxUri, i, t.uri) { e -> _sp.value = _sp.value.copy(message = e) }
+            return@launch
+        }
         // Contexto = "Canciones que te gustan": sigue el orden original de Spotify.
         val ctx = _sp.value.user?.id?.let { "spotify:user:$it:collection" }
         spotify.play(tracks.map { it.uri }, i, ctx)?.let { _sp.value = _sp.value.copy(message = it) }
         delay(800)
         _sp.value = _sp.value.copy(now = runCatching { spotify.nowPlaying() }.getOrNull())
     }
+    /** Reproduce un álbum/lista de Spotify completo (desde el CoverFlow). */
+    fun playSpotifyUri(uri: String, fallbackTracks: List<SpTrack>) = viewModelScope.launch {
+        controller?.pause()
+        if (ensureRemote()) {
+            _source.value = Source.SPOTIFY
+            remote.play(uri) { e -> _sp.value = _sp.value.copy(message = e) }
+        } else {
+            spotify.play(fallbackTracks.map { it.uri }, 0, uri)?.let { _sp.value = _sp.value.copy(message = it) }
+        }
+    }
+
+    fun spotifyPrev() { if (remote.connected) remote.previous() else viewModelScope.launch { spotify.control("prev") } }
+    fun spotifySeek(ms: Long) { remote.seekTo(ms) }
+    fun spotifyShuffle() { remote.toggleShuffle() }
+    fun spotifyRepeat() { remote.toggleRepeat() }
+
     fun spotifyToggle() = viewModelScope.launch {
+        if (remote.connected) { remote.toggle(); return@launch }
         val playing = _sp.value.now?.playing == true
         spotify.control(if (playing) "pause" else "play")
         _sp.value = _sp.value.copy(now = _sp.value.now?.copy(playing = !playing))
     }
     fun spotifyNext() = viewModelScope.launch {
+        if (remote.connected) { remote.next(); return@launch }
         spotify.control("next"); delay(600)
         _sp.value = _sp.value.copy(now = runCatching { spotify.nowPlaying() }.getOrNull())
     }
     fun consumeSpotifyMessage() { _sp.value = _sp.value.copy(message = null) }
 
-    override fun onCleared() { savePlayer(); controller?.release(); super.onCleared() }
+    override fun onCleared() { remote.disconnect(); savePlayer(); controller?.release(); super.onCleared() }
 }
 
 @Suppress("unused")

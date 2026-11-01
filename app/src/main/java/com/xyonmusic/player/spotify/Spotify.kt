@@ -15,7 +15,10 @@ import java.net.URLEncoder
 import java.security.MessageDigest
 import java.security.SecureRandom
 
-data class SpTrack(val uri: String, val name: String, val artist: String, val image: String?, val durationMs: Long)
+data class SpTrack(
+    val uri: String, val name: String, val artist: String, val image: String?, val durationMs: Long,
+    val albumName: String? = null, val albumUri: String? = null
+)
 data class SpPlaylist(val id: String, val uri: String, val name: String, val owner: String, val image: String?, val total: Int)
 data class SpNow(val track: SpTrack, val playing: Boolean, val progressMs: Long)
 /** premium = null cuando Spotify no lo indica (desde feb. 2026 /me ya no devuelve "product"). */
@@ -218,7 +221,11 @@ class Spotify(private val ctx: Context) {
         private fun JSONObject.toTrack(): SpTrack? {
             val uri = optString("uri").takeIf { it.startsWith("spotify:track:") } ?: return null
             val artists = optJSONArray("artists")?.objects()?.joinToString(", ") { it.optString("name") }.orEmpty()
-            return SpTrack(uri, optString("name"), artists, optJSONObject("album")?.optJSONArray("images").firstImage(), optLong("duration_ms"))
+            val al = optJSONObject("album")
+            return SpTrack(
+                uri, optString("name"), artists, al?.optJSONArray("images").firstImage(), optLong("duration_ms"),
+                al?.optString("name")?.takeIf { it.isNotEmpty() }, al?.optString("uri")?.takeIf { it.startsWith("spotify:album:") }
+            )
         }
     }
 }

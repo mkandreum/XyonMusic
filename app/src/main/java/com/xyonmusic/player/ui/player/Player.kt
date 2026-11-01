@@ -46,6 +46,8 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -74,6 +76,35 @@ import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
+
+/** Lo que muestra el reproductor, venga de tu música o de Spotify. */
+private class PModel(
+    val key: String,
+    val title: String,
+    val artist: String,
+    val artLocal: String?,
+    val artBitmap: android.graphics.Bitmap?,
+    val pos: Long,
+    val dur: Long,
+    val playing: Boolean,
+    val shuffle: Boolean,
+    val repeatOn: Boolean,
+    val repeatOne: Boolean,
+    val spotify: Boolean
+)
+
+@Composable
+private fun ModelArt(m: PModel, modifier: Modifier) {
+    if (m.spotify) {
+        val c = LocalXyon.current
+        Box(modifier.background(c.placeholder), contentAlignment = Alignment.Center) {
+            val b = m.artBitmap
+            if (b != null) androidx.compose.foundation.Image(b.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            else Icon(Icons.Rounded.MusicNote, null, Modifier.fillMaxSize(0.42f), tint = c.text2.copy(alpha = 0.55f))
+        }
+    } else Art(m.artLocal, modifier)
+}
+
 // =============================================================================
 // Reproductor a pantalla completa ("Reproduciendo")
 // =============================================================================
@@ -81,7 +112,19 @@ import kotlin.math.roundToInt
 fun FullPlayer(vm: PlayerViewModel, onClose: () -> Unit, onGoAlbum: (Song) -> Unit, onGoArtist: (Song) -> Unit) {
     val c = LocalXyon.current
     val pl by vm.player.collectAsStateWithLifecycle()
-    val s = pl.current ?: return
+    val source by vm.source.collectAsStateWithLifecycle()
+    val rs by vm.remote.state.collectAsStateWithLifecycle()
+    val rArt by vm.remote.art.collectAsStateWithLifecycle()
+    // Posición de Spotify en vivo (el SDK solo avisa en cambios)
+    val rPos by produceState(0L, rs) { while (true) { value = rs?.positionNow() ?: 0L; kotlinx.coroutines.delay(250) } }
+    val spotify = source == PlayerViewModel.Source.SPOTIFY && rs != null
+    val s = pl.current
+    val r = rs
+    val m: PModel = when {
+        spotify && r != null -> PModel(r.uri, r.title, r.artist, null, rArt, rPos, r.durationMs, !r.paused, r.shuffle, r.repeat != 0, r.repeat == 1, true)
+        s != null -> PModel(s.uri, s.title, s.artist, s.uri, null, pl.posMs, pl.durMs, pl.playing, pl.shuffle, pl.repeat != Player.REPEAT_MODE_OFF, pl.repeat == Player.REPEAT_MODE_ONE, false)
+        else -> return
+    }
     val h = rememberHaptics()
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
@@ -91,9 +134,17 @@ fun FullPlayer(vm: PlayerViewModel, onClose: () -> Unit, onGoAlbum: (Song) -> Un
     var menu by remember { mutableStateOf(false) }
     var showQueue by remember { mutableStateOf(false) }
     var showLyrics by remember { mutableStateOf(false) }
-    val lyrics by produceState<String?>(null, s.uri) {
-        value = withContext(Dispatchers.IO) { Lyrics.read(ctx, android.net.Uri.parse(s.uri)) }
+    val lyrics by produceState<String?>(null, m.key) {
+        value = if (m.spotify) null else withContext(Dispatchers.IO) { Lyrics.read(ctx, android.net.Uri.parse(m.key)) }
     }
+    val actions = PActions(
+        toggle = { if (m.spotify) vm.spotifyToggle() else vm.togglePlay() },
+        next = { if (m.spotify) vm.spotifyNext() else vm.next() },
+        prev = { if (m.spotify) vm.spotifyPrev() else vm.previous() },
+        seek = { ms -> if (m.spotify) vm.spotifySeek(ms) else vm.seekTo(ms) },
+        shuffle = { if (m.spotify) vm.spotifyShuffle() else vm.toggleShuffle() },
+        repeat = { if (m.spotify) vm.spotifyRepeat() else vm.cycleRepeat() }
+    )
 
     Box(
         Modifier.fillMaxSize()
@@ -116,38 +167,44 @@ fun FullPlayer(vm: PlayerViewModel, onClose: () -> Unit, onGoAlbum: (Song) -> Un
     ) {
         BlobsBackground()
         val blur = if (Build.VERSION.SDK_INT >= 31) Modifier.blur(80.dp) else Modifier.graphicsLayer { alpha = 0.35f }
-        Art(s.uri, Modifier.fillMaxSize().then(blur).graphicsLayer { alpha = 0.9f })
+        ModelArt(m, Modifier.fillMaxSize().then(blur).graphicsLayer { alpha = 0.9f })
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(c.bg.copy(alpha = 0.35f), c.bg.copy(alpha = 0.85f)))))
 
         Column(Modifier.fillMaxSize().systemBarsPadding().padding(horizontal = 24.dp, vertical = 12.dp)) {
-            // Cabecera
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 IconBtn(Icons.Rounded.KeyboardArrowDown, 32, onClose)
-                Text("Reproduciendo", Modifier.weight(1f), color = c.text2, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+                Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Reproduciendo", color = c.text2, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    if (m.spotify) Text("desde Spotify", color = Color(0xFF1ED760), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                }
                 Box {
                     IconBtn(Icons.Rounded.MoreHoriz, 28, { menu = true })
                     DropdownMenu(menu, { menu = false }) {
-                        DropdownMenuItem({ Text("Ir al álbum") }, { menu = false; onGoAlbum(s) }, leadingIcon = { Icon(Icons.Rounded.Album, null) })
-                        DropdownMenuItem({ Text("Ir al artista") }, { menu = false; onGoArtist(s) }, leadingIcon = { Icon(Icons.Rounded.Person, null) })
-                        DropdownMenuItem({ Text("A continuación") }, { menu = false; showQueue = true }, leadingIcon = { Icon(Icons.AutoMirrored.Rounded.QueueMusic, null) })
-                        if (lyrics != null) DropdownMenuItem(
-                            { Text(if (showLyrics) "Ver carátula" else "Ver letra") }, { menu = false; showLyrics = !showLyrics },
-                            leadingIcon = { Icon(Icons.Rounded.Lyrics, null) }
-                        )
+                        if (m.spotify) {
+                            DropdownMenuItem({ Text("Abrir en Spotify") }, { menu = false; vm.spotify.openInSpotify(m.key) }, leadingIcon = { Icon(Icons.Rounded.OpenInNew, null) })
+                        } else s?.let { song ->
+                            DropdownMenuItem({ Text("Ir al álbum") }, { menu = false; onGoAlbum(song) }, leadingIcon = { Icon(Icons.Rounded.Album, null) })
+                            DropdownMenuItem({ Text("Ir al artista") }, { menu = false; onGoArtist(song) }, leadingIcon = { Icon(Icons.Rounded.Person, null) })
+                            DropdownMenuItem({ Text("A continuación") }, { menu = false; showQueue = true }, leadingIcon = { Icon(Icons.AutoMirrored.Rounded.QueueMusic, null) })
+                            if (lyrics != null) DropdownMenuItem(
+                                { Text(if (showLyrics) "Ver carátula" else "Ver letra") }, { menu = false; showLyrics = !showLyrics },
+                                leadingIcon = { Icon(Icons.Rounded.Lyrics, null) }
+                            )
+                        }
                     }
                 }
             }
             if (landscape) {
                 Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.fillMaxHeight(0.9f).aspectRatio(1f)) { ArtOrLyrics(s, pl.playing, showLyrics, lyrics, h, vm) }
+                    Box(Modifier.fillMaxHeight(0.9f).aspectRatio(1f)) { ArtOrLyrics(m, showLyrics, lyrics, h, actions) }
                     Spacer(Modifier.width(32.dp))
-                    Column(Modifier.weight(1f)) { Controls(vm, s) }
+                    Column(Modifier.weight(1f)) { Controls(m, actions) }
                 }
             } else {
                 Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                    Box(Modifier.widthIn(max = 360.dp).fillMaxWidth().aspectRatio(1f)) { ArtOrLyrics(s, pl.playing, showLyrics, lyrics, h, vm) }
+                    Box(Modifier.widthIn(max = 360.dp).fillMaxWidth().aspectRatio(1f)) { ArtOrLyrics(m, showLyrics, lyrics, h, actions) }
                     Spacer(Modifier.height(16.dp))
-                    Controls(vm, s)
+                    Controls(m, actions)
                 }
             }
         }
@@ -155,22 +212,27 @@ fun FullPlayer(vm: PlayerViewModel, onClose: () -> Unit, onGoAlbum: (Song) -> Un
     if (showQueue) QueueSheet(vm, h) { showQueue = false }
 }
 
+private class PActions(
+    val toggle: () -> Unit, val next: () -> Unit, val prev: () -> Unit,
+    val seek: (Long) -> Unit, val shuffle: () -> Unit, val repeat: () -> Unit
+)
+
 @Composable
-private fun ArtOrLyrics(s: Song, playing: Boolean, showLyrics: Boolean, lyrics: String?, h: Haptics, vm: PlayerViewModel) {
+private fun ArtOrLyrics(m: PModel, showLyrics: Boolean, lyrics: String?, h: Haptics, a: PActions) {
     val c = LocalXyon.current
     AnimatedContent(showLyrics && lyrics != null, transitionSpec = { fadeIn(tween(260)) togetherWith fadeOut(tween(200)) }, label = "al") { lyr ->
         if (lyr) Box(Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp)).glass(RoundedCornerShape(16.dp), c)) {
             Text(lyrics.orEmpty(), Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), color = c.text, fontSize = 19.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold)
-        } else SwipeArt(s, playing, h, onNext = { vm.next() }, onPrev = { vm.previous() })
+        } else SwipeArt(m, h, onNext = a.next, onPrev = a.prev)
     }
 }
 
 /** Carátula con sombra; se encoge al pausar y se desliza a los lados para cambiar de canción. */
 @Composable
-private fun SwipeArt(s: Song, playing: Boolean, h: Haptics, onNext: () -> Unit, onPrev: () -> Unit) {
+private fun SwipeArt(m: PModel, h: Haptics, onNext: () -> Unit, onPrev: () -> Unit) {
     val scope = rememberCoroutineScope()
     val dx = remember { Animatable(0f) }
-    val scale by animateFloatAsState(if (playing) 1f else 0.88f, spring(dampingRatio = 0.6f, stiffness = 260f), label = "artScale")
+    val scale by animateFloatAsState(if (m.playing) 1f else 0.88f, spring(dampingRatio = 0.6f, stiffness = 260f), label = "artScale")
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val w = constraints.maxWidth.toFloat()
         Box(
@@ -198,38 +260,37 @@ private fun SwipeArt(s: Song, playing: Boolean, h: Haptics, onNext: () -> Unit, 
                         onDragCancel = { scope.launch { dx.animateTo(0f) } }
                     ) { ch, d -> ch.consume(); scope.launch { dx.snapTo(dx.value + d) } }
                 }
-        ) { Art(s.uri, Modifier.fillMaxSize()) }
+        ) { ModelArt(m, Modifier.fillMaxSize()) }
     }
 }
 
 @Composable
-private fun Controls(vm: PlayerViewModel, s: Song) {
+private fun Controls(m: PModel, a: PActions) {
     val c = LocalXyon.current
-    val pl by vm.player.collectAsStateWithLifecycle()
     val h = rememberHaptics()
-    AnimatedContent(s, transitionSpec = { fadeIn(tween(250)) togetherWith fadeOut(tween(150)) }, label = "title") { song ->
+    AnimatedContent(Triple(m.key, m.title, m.artist), transitionSpec = { fadeIn(tween(250)) togetherWith fadeOut(tween(150)) }, label = "title") { (_, title, artist) ->
         Column(Modifier.fillMaxWidth()) {
-            Text(song.title, Modifier.fillMaxWidth(), color = c.text, fontSize = 26.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text(song.artist, Modifier.fillMaxWidth(), color = c.text2, fontSize = 17.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(title, Modifier.fillMaxWidth(), color = c.text, fontSize = 26.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(artist, Modifier.fillMaxWidth(), color = c.text2, fontSize = 17.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
     }
     Spacer(Modifier.height(16.dp))
-    SeekBar(pl.posMs, pl.durMs, h) { vm.seekTo(it) }
+    SeekBar(m.pos, m.dur, h) { a.seek(it) }
     Spacer(Modifier.height(18.dp))
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-        ToggleBtn(Icons.Rounded.Shuffle, pl.shuffle) { h.tap(); vm.toggleShuffle() }
-        IconBtn(Icons.Rounded.SkipPrevious, 40, { h.confirm(); vm.previous() })
+        ToggleBtn(Icons.Rounded.Shuffle, m.shuffle) { h.tap(); a.shuffle() }
+        IconBtn(Icons.Rounded.SkipPrevious, 40, { h.confirm(); a.prev() })
         Box(
             Modifier.size(76.dp).shadow(14.dp, CircleShape, spotColor = c.accent, ambientColor = c.accent)
-                .clip(CircleShape).background(c.accent).bounceClick(0.86f) { h.confirm(); vm.togglePlay() },
+                .clip(CircleShape).background(c.accent).bounceClick(0.86f) { h.confirm(); a.toggle() },
             contentAlignment = Alignment.Center
         ) {
-            AnimatedContent(pl.playing, transitionSpec = { (scaleIn(spring(dampingRatio = 0.5f)) + fadeIn()) togetherWith (scaleOut() + fadeOut()) }, label = "pp") { p ->
+            AnimatedContent(m.playing, transitionSpec = { (scaleIn(spring(dampingRatio = 0.5f)) + fadeIn()) togetherWith (scaleOut() + fadeOut()) }, label = "pp") { p ->
                 Icon(if (p) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, null, Modifier.size(44.dp), tint = Color.White)
             }
         }
-        IconBtn(Icons.Rounded.SkipNext, 40, { h.confirm(); vm.next() })
-        ToggleBtn(if (pl.repeat == Player.REPEAT_MODE_ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat, pl.repeat != Player.REPEAT_MODE_OFF) { h.tap(); vm.cycleRepeat() }
+        IconBtn(Icons.Rounded.SkipNext, 40, { h.confirm(); a.next() })
+        ToggleBtn(if (m.repeatOne) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat, m.repeatOn) { h.tap(); a.repeat() }
     }
 }
 
@@ -346,17 +407,29 @@ private fun QueueSheet(vm: PlayerViewModel, h: Haptics, onDismiss: () -> Unit) {
     }
 }
 
+
 // =============================================================================
-// Mini reproductores (58dp, cristal) — local y Spotify
+// Mini reproductor (58dp, cristal): tu música o lo que suena en Spotify
 // =============================================================================
 @Composable
 fun MiniPlayer(vm: PlayerViewModel, onOpen: () -> Unit) {
     val c = LocalXyon.current
     val pl by vm.player.collectAsStateWithLifecycle()
-    val s = pl.current ?: return
+    val source by vm.source.collectAsStateWithLifecycle()
+    val rs by vm.remote.state.collectAsStateWithLifecycle()
+    val rArt by vm.remote.art.collectAsStateWithLifecycle()
+    val rPos by produceState(0L, rs) { while (true) { value = rs?.positionNow() ?: 0L; kotlinx.coroutines.delay(500) } }
+    val r = rs
+    val s = pl.current
+    val m: PModel = when {
+        source == PlayerViewModel.Source.SPOTIFY && r != null -> PModel(r.uri, r.title, r.artist, null, rArt, rPos, r.durationMs, !r.paused, r.shuffle, r.repeat != 0, r.repeat == 1, true)
+        s != null -> PModel(s.uri, s.title, s.artist, s.uri, null, pl.posMs, pl.durMs, pl.playing, pl.shuffle, false, false, false)
+        else -> return
+    }
     val h = rememberHaptics()
     var drag by remember { mutableFloatStateOf(0f) }
     val shape = RoundedCornerShape(20.dp)
+    val green = Color(0xFF1ED760)
     Box(
         Modifier.fillMaxWidth().height(58.dp)
             .graphicsLayer { translationY = drag.coerceAtMost(0f) * 0.4f }
@@ -367,22 +440,28 @@ fun MiniPlayer(vm: PlayerViewModel, onOpen: () -> Unit) {
             .bounceClick(0.98f) { h.tap(); onOpen() }
     ) {
         Row(Modifier.fillMaxSize().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Art(s.uri, Modifier.size(42.dp).clip(RoundedCornerShape(6.dp)))
+            Box {
+                ModelArt(m, Modifier.size(42.dp).clip(RoundedCornerShape(6.dp)))
+                if (m.spotify) Box(Modifier.align(Alignment.BottomEnd).offset(4.dp, 4.dp).size(16.dp).clip(CircleShape).background(green), contentAlignment = Alignment.Center) {
+                    EqualizerBars(m.playing, Color.Black, size = 9.dp)
+                }
+            }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(s.title, color = c.text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(s.artist, color = c.text2, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(m.title, color = c.text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(if (m.spotify) "Spotify · ${m.artist}" else m.artist, color = if (m.spotify) green else c.text2, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            IconBtn(if (pl.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, 30, { h.confirm(); vm.togglePlay() })
-            IconBtn(Icons.Rounded.SkipNext, 30, { h.confirm(); vm.next() })
+            IconBtn(if (m.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, 30, { h.confirm(); if (m.spotify) vm.spotifyToggle() else vm.togglePlay() })
+            IconBtn(Icons.Rounded.SkipNext, 30, { h.confirm(); if (m.spotify) vm.spotifyNext() else vm.next() })
         }
-        val prog = if (pl.durMs > 0) (pl.posMs.toFloat() / pl.durMs).coerceIn(0f, 1f) else 0f
+        val prog = if (m.dur > 0) (m.pos.toFloat() / m.dur).coerceIn(0f, 1f) else 0f
         Box(Modifier.align(Alignment.BottomCenter).padding(horizontal = 14.dp).fillMaxWidth().height(2.dp).clip(RoundedCornerShape(1.dp)).background(c.text.copy(alpha = 0.12f))) {
-            Box(Modifier.fillMaxWidth(prog).fillMaxHeight().background(c.accent))
+            Box(Modifier.fillMaxWidth(prog).fillMaxHeight().background(if (m.spotify) green else c.accent))
         }
     }
 }
 
+/** Respaldo sin la app de Spotify instalada: lo que suena en Spotify (vía Web API); al tocar abre Spotify. */
 @Composable
 fun SpotifyMiniPlayer(vm: PlayerViewModel) {
     val c = LocalXyon.current
@@ -396,12 +475,7 @@ fun SpotifyMiniPlayer(vm: PlayerViewModel) {
             .bounceClick(0.98f) { h.tap(); vm.spotify.openInSpotify(n.track.uri) }.padding(horizontal = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box {
-            AsyncImage(n.track.image, null, Modifier.size(42.dp).clip(RoundedCornerShape(6.dp)).background(c.placeholder))
-            Box(Modifier.align(Alignment.BottomEnd).offset(4.dp, 4.dp).size(16.dp).clip(CircleShape).background(green), contentAlignment = Alignment.Center) {
-                EqualizerBars(n.playing, Color.Black, size = 9.dp)
-            }
-        }
+        AsyncImage(n.track.image, null, Modifier.size(42.dp).clip(RoundedCornerShape(6.dp)).background(c.placeholder))
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(n.track.name, color = c.text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)

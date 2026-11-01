@@ -73,6 +73,9 @@ import com.xyonmusic.player.data.Song
 import com.xyonmusic.player.spotify.Spotify
 import com.xyonmusic.player.ui.components.Art
 import com.xyonmusic.player.ui.components.CoverFlow
+import com.xyonmusic.player.ui.components.SpAlbum
+import com.xyonmusic.player.ui.components.flowItems
+import com.xyonmusic.player.ui.components.spotifyAlbums
 import com.xyonmusic.player.ui.components.press
 import com.xyonmusic.player.ui.components.rememberHaptics
 import com.xyonmusic.player.ui.player.FullPlayer
@@ -141,6 +144,7 @@ fun XyonApp(vm: PlayerViewModel, onPickFolder: () -> Unit) {
     var settings by rememberSaveable { mutableStateOf(false) }
     var player by rememberSaveable { mutableStateOf(false) }
     var menuSong by remember { mutableStateOf<Song?>(null) }
+    var spAlbum by remember { mutableStateOf<SpAlbum?>(null) }
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     LaunchedEffect(sp.message) { sp.message?.let { Toast.makeText(ctx, it, Toast.LENGTH_LONG).show(); vm.consumeSpotifyMessage() } }
@@ -152,12 +156,14 @@ fun XyonApp(vm: PlayerViewModel, onPickFolder: () -> Unit) {
             openArtist = { artist = it; album = null; player = false },
             openSettings = { settings = true },
             songMenu = { menuSong = it },
-            pickFolder = onPickFolder
+            pickFolder = onPickFolder,
+            openSpotifyAlbum = { spAlbum = it }
         )
     }
-    BackHandler(player || settings || album != null || artist != null || tab != Tab.LIBRARY) {
+    BackHandler(player || settings || album != null || spAlbum != null || artist != null || tab != Tab.LIBRARY) {
         when {
             player -> player = false
+            spAlbum != null -> spAlbum = null
             settings -> settings = false
             album != null -> album = null
             artist != null -> artist = null
@@ -165,9 +171,14 @@ fun XyonApp(vm: PlayerViewModel, onPickFolder: () -> Unit) {
         }
     }
 
+    val source by vm.source.collectAsStateWithLifecycle()
+    val rs by vm.remote.state.collectAsStateWithLifecycle()
+    val remoteActive = source == PlayerViewModel.Source.SPOTIFY && rs != null
     val current = pl.current
-    val showSpotifyMini = sp.now != null && (current == null || (sp.now?.playing == true && !pl.playing))
-    val hasMini = (current != null || showSpotifyMini)
+    val hasPlayer = current != null || remoteActive
+    // Respaldo (sin app de Spotify): lo que suena en Spotify vía Web API
+    val showSpotifyMini = !hasPlayer && sp.now != null
+    val hasMini = hasPlayer || showSpotifyMini
     val navInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val bottomInset = navInset + 20.dp + 70.dp + (if (hasMini) 68.dp else 0.dp) + 16.dp
 
@@ -175,9 +186,10 @@ fun XyonApp(vm: PlayerViewModel, onPickFolder: () -> Unit) {
         BlobsBackground()
 
         // Apaisado en Library: CoverFlow horizontal a pantalla completa (como la original)
-        val landscapeFlow = landscape && tab == Tab.LIBRARY && artist == null && !player && lib.albums.isNotEmpty()
+        val flow = remember(lib.albums, sp.liked) { flowItems(lib.albums, spotifyAlbums(sp.liked)) }
+        val landscapeFlow = landscape && tab == Tab.LIBRARY && artist == null && !player && flow.isNotEmpty()
         if (landscapeFlow) {
-            CoverFlow(lib.albums, vertical = false, onOpen = nav.openAlbum, modifier = Modifier.fillMaxSize().systemBarsPadding().padding(vertical = 12.dp))
+            CoverFlow(flow, vertical = false, onOpen = nav::openFlow, modifier = Modifier.fillMaxSize().systemBarsPadding().padding(vertical = 12.dp))
         } else {
             AnimatedContent(
                 tab,
@@ -209,7 +221,7 @@ fun XyonApp(vm: PlayerViewModel, onPickFolder: () -> Unit) {
             Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(start = 20.dp, end = 20.dp, bottom = 20.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            AnimatedVisibility(current != null && !showSpotifyMini, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+            AnimatedVisibility(hasPlayer, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
                 MiniPlayer(vm) { player = true }
             }
             AnimatedVisibility(showSpotifyMini, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) { SpotifyMiniPlayer(vm) }
@@ -222,11 +234,16 @@ fun XyonApp(vm: PlayerViewModel, onPickFolder: () -> Unit) {
         AnimatedVisibility(album != null, enter = fadeIn(tween(250)) + scaleIn(initialScale = 0.92f), exit = fadeOut(tween(200)) + scaleOut(targetScale = 0.95f)) {
             shownAlbum?.let { AlbumDialog(it, vm, nav) { album = null } }
         }
+        var shownSp by remember { mutableStateOf<SpAlbum?>(null) }
+        if (spAlbum != null) shownSp = spAlbum
+        AnimatedVisibility(spAlbum != null, enter = fadeIn(tween(250)) + scaleIn(initialScale = 0.92f), exit = fadeOut(tween(200)) + scaleOut(targetScale = 0.95f)) {
+            shownSp?.let { SpotifyAlbumDialog(it, vm) { spAlbum = null } }
+        }
         AnimatedVisibility(settings, enter = fadeIn(tween(250)) + scaleIn(initialScale = 0.92f), exit = fadeOut(tween(200)) + scaleOut(targetScale = 0.95f)) {
             SettingsDialog(vm, onChangeFolder = { settings = false; onPickFolder() }) { settings = false }
         }
         AnimatedVisibility(
-            player && current != null,
+            player && hasPlayer,
             enter = slideInVertically(spring(dampingRatio = 0.86f, stiffness = 380f)) { it } + fadeIn(),
             exit = slideOutVertically(tween(300)) { it } + fadeOut(tween(300))
         ) {
@@ -257,7 +274,7 @@ private fun BottomNav(tab: Tab, onSelect: (Tab) -> Unit) {
     val main = listOf(Tab.LIBRARY, Tab.FORYOU, Tab.TOP)
     Row(Modifier.fillMaxWidth().height(70.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
         val pill = RoundedCornerShape(35.dp)
-        BoxWithConstraints(Modifier.weight(1f).fillMaxHeight().clip(pill).glass(pill, c).chromaticEdge(pill, c)) {
+        BoxWithConstraints(Modifier.weight(1f).fillMaxHeight().clip(pill).background(c.surface.copy(alpha = if (c.isLight) 0.5f else 0.38f)).glass(pill, c).chromaticEdge(pill, c)) {
             val w = maxWidth / main.size
             val idx = main.indexOf(tab)
             val x by animateDpAsState(w * idx.coerceAtLeast(0), spring(dampingRatio = 0.72f, stiffness = 320f), label = "ind")
@@ -283,7 +300,7 @@ private fun BottomNav(tab: Tab, onSelect: (Tab) -> Unit) {
         }
         val sel = tab == Tab.SEARCH
         Box(
-            Modifier.size(70.dp).clip(CircleShape).glass(CircleShape, c).chromaticEdge(CircleShape, c).press(h, 0.9f) { onSelect(Tab.SEARCH) },
+            Modifier.size(70.dp).clip(CircleShape).background(c.surface.copy(alpha = if (c.isLight) 0.5f else 0.38f)).glass(CircleShape, c).chromaticEdge(CircleShape, c).press(h, 0.9f) { onSelect(Tab.SEARCH) },
             contentAlignment = Alignment.Center
         ) { Icon(Icons.Rounded.Search, "Buscar", Modifier.size(32.dp), tint = if (sel) c.accent else c.text) }
     }

@@ -61,8 +61,12 @@ class Nav(
     val openArtist: (Artist) -> Unit,
     val openSettings: () -> Unit,
     val songMenu: (Song) -> Unit,
-    val pickFolder: () -> Unit
-)
+    val pickFolder: () -> Unit,
+    val openSpotifyAlbum: (SpAlbum) -> Unit = {}
+) {
+    /** Abre un elemento del CoverFlow (álbum local o de Spotify). */
+    fun openFlow(f: FlowItem) { f.album?.let(openAlbum); f.spotify?.let(openSpotifyAlbum) }
+}
 
 private val SpotifyGreen = Color(0xFF1ED760)
 
@@ -78,6 +82,7 @@ fun LibraryScreen(vm: PlayerViewModel, nav: Nav, bottomInset: Dp) {
     var showAlbums by rememberSaveable { mutableStateOf(false) }
     var likedOpen by rememberSaveable { mutableStateOf(true) }
     val h = rememberHaptics()
+    val flow = remember(lib.albums, sp.liked) { flowItems(lib.albums, spotifyAlbums(sp.liked)) }
 
     Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
         BigHeader("Library") { GlassCircleBtn(Icons.Rounded.Settings, nav.openSettings) }
@@ -89,13 +94,13 @@ fun LibraryScreen(vm: PlayerViewModel, nav: Nav, bottomInset: Dp) {
             Chip("Canciones", !showAlbums) { showAlbums = false }
             Chip("Álbumes", showAlbums) { showAlbums = true }
             Text(
-                if (showAlbums) "${lib.albums.size} álbumes" else "${lib.songs.size} canciones",
+                if (showAlbums) "${flow.size} álbumes" else "${lib.songs.size + sp.liked.size} canciones",
                 Modifier.clip(RoundedCornerShape(15.dp)).glass(RoundedCornerShape(15.dp), c, shine = false).padding(horizontal = 12.dp, vertical = 5.dp),
                 color = c.text2, fontSize = 13.sp
             )
         }
         if (showAlbums) {
-            CoverFlow(lib.albums, vertical = true, onOpen = nav.openAlbum, bottomPadding = bottomInset)
+            CoverFlow(flow, vertical = true, onOpen = nav::openFlow, bottomPadding = bottomInset)
         } else {
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = bottomInset)) {
                 // Lista predefinida: "Canciones que te gustan" de Spotify, en el mismo orden que Spotify.
@@ -398,6 +403,68 @@ fun AlbumDialog(album: Album, vm: PlayerViewModel, nav: Nav, onClose: () -> Unit
     }
 }
 
+// =============================================================================
+// ÁLBUM DE SPOTIFY (de tus "Canciones que te gustan")
+// =============================================================================
+@Composable
+fun SpotifyAlbumDialog(album: SpAlbum, vm: PlayerViewModel, onClose: () -> Unit) {
+    val c = LocalXyon.current
+    val sp by vm.sp.collectAsStateWithLifecycle()
+    val rs by vm.remote.state.collectAsStateWithLifecycle()
+    val h = rememberHaptics()
+    Scrim(onClose) {
+        Column(
+            Modifier.fillMaxWidth(0.92f).widthIn(max = 520.dp).fillMaxHeight(0.8f)
+                .clip(RoundedCornerShape(22.dp)).background(c.surface).glass(RoundedCornerShape(22.dp), c)
+                .clickable(remember { MutableInteractionSource() }, null) {}
+                .padding(18.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                AsyncImage(album.image, null, Modifier.size(76.dp).clip(RoundedCornerShape(10.dp)).background(c.placeholder))
+                Spacer(Modifier.width(15.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(album.name, color = c.text, fontSize = 21.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(album.artist, color = c.text2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("${album.tracks.size} que te gustan · Spotify", color = SpotifyGreen, fontSize = 13.sp)
+                }
+                Icon(Icons.Rounded.Close, "Cerrar", Modifier.size(40.dp).clip(CircleShape).press(h, 0.85f, onClick = onClose).padding(8.dp), tint = c.text)
+            }
+            Spacer(Modifier.height(14.dp))
+            Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                PillAction(Icons.Rounded.PlayArrow, "Álbum completo", Modifier.weight(1f)) {
+                    val u = album.uri
+                    if (u != null) vm.playSpotifyUri(u, album.tracks) else vm.playSpotify(sp.liked, sp.liked.indexOf(album.tracks.first()))
+                    onClose()
+                }
+                PillAction(Icons.Rounded.Favorite, "Mis me gusta", Modifier.weight(1f)) {
+                    vm.playSpotify(sp.liked, sp.liked.indexOf(album.tracks.first())); onClose()
+                }
+            }
+            LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
+                itemsIndexed(album.tracks, key = { i, t -> "sa$i${t.uri}" }) { i, t ->
+                    val now = rs?.uri == t.uri || sp.now?.track?.uri == t.uri
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { h.tap(); vm.playSpotify(sp.liked, sp.liked.indexOf(t)) }
+                            .padding(horizontal = 5.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(Modifier.width(28.dp), contentAlignment = Alignment.Center) {
+                            if (now) EqualizerBars(rs?.paused == false || sp.now?.playing == true, SpotifyGreen)
+                            else Text("${i + 1}", color = c.text2, fontWeight = FontWeight.SemiBold)
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(t.name, color = if (now) SpotifyGreen else c.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(t.artist, color = c.text2, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        Text(com.xyonmusic.player.data.formatTime(t.durationMs), color = c.text2, fontSize = 14.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
 /** Fondo oscurecido que cierra al tocar fuera. */
 @Composable
 fun Scrim(onDismiss: () -> Unit, alpha: Float = 0.55f, content: @Composable BoxScope.() -> Unit) {
@@ -472,6 +539,8 @@ fun SettingsDialog(vm: PlayerViewModel, onChangeFolder: () -> Unit, onClose: () 
                         )
                     }
                 }
+                Spacer(Modifier.height(10.dp))
+                SpotifyAppStatus(vm)
                 Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     PillAction(Icons.Rounded.Refresh, if (sp.loading) "Cargando…" else "Actualizar", Modifier.weight(1f)) { vm.refreshSpotify() }
@@ -483,6 +552,8 @@ fun SettingsDialog(vm: PlayerViewModel, onChangeFolder: () -> Unit, onClose: () 
                         "1. Crea una app en developer.spotify.com/dashboard (tu cuenta debe ser Premium, requisito de Spotify desde 2026)\n2. Añade el Redirect URI: ${Spotify.REDIRECT}\n3. Añade tu email en User Management\n4. Pega aquí el Client ID",
                     color = c.text2, fontSize = 13.sp
                 )
+                Spacer(Modifier.height(10.dp))
+                SpotifyAppStatus(vm)
                 Spacer(Modifier.height(10.dp))
                 Box(
                     Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(24.dp)).glass(RoundedCornerShape(24.dp), c).padding(horizontal = 16.dp),
@@ -502,6 +573,35 @@ fun SettingsDialog(vm: PlayerViewModel, onChangeFolder: () -> Unit, onClose: () 
                     color = c.text2.copy(alpha = 0.8f), fontSize = 11.sp
                 )
             }
+        }
+    }
+}
+
+/** Estado de la app de Spotify (SDK) + huella SHA-1 a registrar en Spotify for Developers. */
+@Composable
+private fun SpotifyAppStatus(vm: PlayerViewModel) {
+    val c = LocalXyon.current
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val clip = androidx.compose.ui.platform.LocalClipboardManager.current
+    val rs by vm.remote.state.collectAsStateWithLifecycle()
+    val sha1 = remember { com.xyonmusic.player.spotify.SpotifyRemote.signingSha1(ctx) }
+    val installed = remember { vm.remote.installed }
+    val linked = vm.remote.connected || rs != null
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).glass(RoundedCornerShape(14.dp), c, shine = false).padding(12.dp)) {
+        Text(
+            when {
+                !installed -> "Instala la app de Spotify para reproducir sin salir de XyonMusic."
+                linked -> "Conectado con la app de Spotify: se reproduce dentro de XyonMusic."
+                else -> "Al reproducir algo de Spotify se conectará con su app (puede pedirte permiso la primera vez)."
+            },
+            color = if (linked) SpotifyGreen else c.text2, fontSize = 13.sp
+        )
+        if (sha1 != null) {
+            Spacer(Modifier.height(8.dp))
+            Text("En tu app de Spotify for Developers → Android packages añade:", color = c.text2, fontSize = 12.sp)
+            Text("Paquete: ${ctx.packageName}", color = c.text, fontSize = 12.sp, modifier = Modifier.clickable { clip.setText(androidx.compose.ui.text.AnnotatedString(ctx.packageName)) })
+            Text("SHA-1: $sha1", color = c.text, fontSize = 12.sp, modifier = Modifier.clickable { clip.setText(androidx.compose.ui.text.AnnotatedString(sha1)) })
+            Text("(toca para copiar)", color = c.text2.copy(alpha = 0.7f), fontSize = 11.sp)
         }
     }
 }

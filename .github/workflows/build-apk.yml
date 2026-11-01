@@ -38,6 +38,24 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
+      - name: Clave de firma estable (caché de Actions, no se sube al repo)
+        id: ks
+        uses: actions/cache@v4
+        with:
+          path: ci-keystore
+          key: xyon-signing-key-v1
+      - name: Crear la clave la primera vez
+        if: steps.ks.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ci-keystore
+          keytool -genkeypair -keystore ci-keystore/xyon.jks -alias xyon -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass xyonmusic -keypass xyonmusic -dname "CN=XyonMusic"
+      - name: Firmar con la clave estable
+        run: |
+          printf "storeFile=ci-keystore/xyon.jks\nstorePassword=xyonmusic\nkeyAlias=xyon\nkeyPassword=xyonmusic\n" > keystore.properties
+          SHA1=$(keytool -list -v -keystore ci-keystore/xyon.jks -storepass xyonmusic | grep "SHA1:" | sed 's/.*SHA1: //')
+          echo "Huella SHA-1: $SHA1"
+          printf "\n\n---\n**Huella SHA-1 de la firma** (Spotify for Developers → Android packages, paquete \`com.xyonmusic.player\`):\n\`%s\`\n" "$SHA1" >> RELEASE_NOTES.md
       - name: Keystore opcional (secrets)
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
