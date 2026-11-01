@@ -23,19 +23,19 @@ import com.xyonmusic.player.data.Song
 @Composable
 fun SongRow(song: Song, playing: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Row(
-        modifier = modifier.fillMaxWidth().clickable(onClick = onClick).padding(12.dp),
+        modifier = modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 18.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         AsyncImage(
             model = song.artUri ?: song.contentUri,
             contentDescription = song.title ?: song.name,
-            modifier = Modifier.size(52.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.secondaryContainer),
+            modifier = Modifier.size(50.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.secondaryContainer),
             contentScale = ContentScale.Crop
         )
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(song.title ?: song.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge)
-            Text(song.artist ?: "Artista desconocido", maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(song.title ?: song.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge, color = if (playing) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground)
+            Text(song.artist ?: "Artista desconocido", maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         }
         if (playing) {
             Box(Modifier.size(8.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary))

@@ -20,8 +20,8 @@ android {
         applicationId = "com.xyonmusic.player"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0-native"
+        versionCode = 2
+        versionName = "2.0-ios26"
 
         vectorDrawables { useSupportLibrary = true }
     }
@@ -40,7 +40,8 @@ android {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             // En clones públicos sin keystore.properties se compila sin firma dedicada.
-            if (keystoreProps.containsKey("storeFile")) signingConfig = signingConfigs.getByName("release")
+            // Sin keystore propio se firma con la clave debug para que el APK R8 sea instalable.
+            signingConfig = signingConfigs.getByName(if (keystoreProps.containsKey("storeFile")) "release" else "debug")
         }
         debug {
             isDebuggable = false // FIX: la versión WebView venía con debuggable=true

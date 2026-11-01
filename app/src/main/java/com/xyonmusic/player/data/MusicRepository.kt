@@ -26,7 +26,8 @@ class MusicRepository(private val context: Context) {
             MediaStore.Audio.Media.ARTIST,
             MediaStore.Audio.Media.ALBUM,
             MediaStore.Audio.Media.DURATION,
-            MediaStore.Audio.Media.ALBUM_ID
+            MediaStore.Audio.Media.ALBUM_ID,
+            MediaStore.Audio.Media.DATE_ADDED
         )
         val sel = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
         context.contentResolver.query(collection, proj, sel, null, "${MediaStore.Audio.Media.TITLE} ASC")?.use { c ->
@@ -37,13 +38,14 @@ class MusicRepository(private val context: Context) {
             val album = c.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
             val dur = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
             val albId = c.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+            val added = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
             while (c.moveToNext()) {
                 val uri = ContentUris.withAppendedId(collection, c.getLong(id))
                 val aId = c.getLong(albId)
                 val art: Uri? = if (aId > 0)
                     ContentUris.withAppendedId(Uri.parse("content://media/external/audio/albumart"), aId)
                 else null
-                out += Song(uri, c.getString(name) ?: "?", c.getString(title), c.getString(artist), c.getString(album), c.getLong(dur).takeIf { it > 0 }, art)
+                out += Song(uri, c.getString(name) ?: "?", c.getString(title), c.getString(artist), c.getString(album), c.getLong(dur).takeIf { it > 0 }, art, c.getLong(added))
             }
         }
         out
