@@ -1,24 +1,20 @@
-## XyonMusic 2.1
+## XyonMusic 2.2
 
-App reconstruida con el diseño de la APK original (XyonMusic Pro), más Spotify y mejoras de uso. APK release optimizado con R8. Si tienes otra versión instalada con distinta firma, desinstálala antes.
+APK release optimizado con R8. **Desinstala la versión anterior antes de instalar esta**: a partir de ahora el APK se firma siempre con la misma clave, así que las próximas versiones se instalarán encima sin desinstalar.
 
-### Diseño original recuperado
-- Fondo con dos "blobs" de color animados y difuminados, y tarjetas de cristal.
-- 4 temas: default (rojo/magenta), purple, green y light.
-- Pestañas Library, 4U, Top y Buscar en una cápsula de cristal de 70dp, con el círculo de búsqueda aparte.
-- Carpeta de música elegida con el selector, con pantalla "Analizando tu música..." y su porcentaje.
-- Library con los chips Canciones y Álbumes, 4U con el descubrimiento diario de álbum y canciones para ti, Top con tus canciones más escuchadas, búsqueda por álbumes, artistas y canciones, página de artista, ficha emergente de álbum y Ajustes.
-- Reproductor "Reproduciendo" con la carátula difuminada de fondo, botón play circular en color acento y menú ⋯.
+### Spotify dentro de XyonMusic
+- Las canciones de Spotify se reproducen sin salir de la app, con el SDK oficial de Spotify (App Remote). El audio lo pone la app de Spotify en segundo plano, y se controla todo desde el reproductor de XyonMusic: carátula, progreso, play/pausa, anterior/siguiente, aleatorio y repetir.
+- El mini reproductor también muestra lo que suena en Spotify, con un indicador verde.
+- Si no tienes la app de Spotify instalada, se usa como respaldo el control por Web API.
 
-### Novedades
-- Barra de navegación y botón de búsqueda con aberración cromática suave en los bordes, estilo iOS 26.
-- CoverFlow horizontal igual que el original en apaisado. El vertical está mejorado: las portadas no se solapan y solo hay un título, bajo la portada central.
-- Spotify:
-  - "Canciones que te gustan" encabeza Library, en el mismo orden que en Spotify, y se guarda para verla sin conexión.
-  - Se conecta desde Ajustes y tiene mini reproductor propio.
-  - Adaptado a los cambios de la API de Spotify de 2026.
-- Vibraciones en controles, barra de progreso, carrusel y pulsaciones largas.
-- Menú al mantener pulsada una canción: Reproducir después, Añadir a la cola, Ir al álbum, Ir al artista.
-- Cola "A continuación" reordenable arrastrando y letras incrustadas (MP3 con ID3), ambas desde el menú ⋯ del reproductor.
-- Gestos: deslizar el mini reproductor hacia arriba para abrir, el reproductor hacia abajo para cerrar y la carátula a los lados para cambiar de canción.
-- Se recuerda la última cola y su posición.
+**Para activarlo, una sola vez:**
+1. En developer.spotify.com/dashboard, abre tu app → Settings → Android packages.
+2. Añade el paquete `com.xyonmusic.player` y la huella SHA-1 que aparece al final de estas notas (también la ves en Ajustes → Spotify, y se copia tocándola).
+3. Ten la app de Spotify instalada y con sesión iniciada. Para elegir canciones concretas hace falta Premium.
+
+### CoverFlow con Spotify
+- Los álbumes de tus "Canciones que te gustan" aparecen en el CoverFlow vertical y horizontal, mezclados con tus álbumes locales y marcados con un corazón verde.
+- Al tocar uno se abre su ficha: puedes reproducir el álbum completo o tus me gusta desde esa canción.
+
+### Diseño
+- La barra inferior y el botón de búsqueda son más translúcidos (cristal esmerilado) y conservan el borde con aberración cromática.
