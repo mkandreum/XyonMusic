@@ -36,7 +36,8 @@ jobs:
         run: gradle :app:assembleRelease 2>&1 | tee build.log
       - name: Errores de compilación
         if: failure()
-        run: grep -E "^e: |error:|ERROR" build.log | head -80
+        run: |
+          grep -E "^e: |error:|ERROR" build.log | head -80
       - name: Rename APK
         run: cp app/build/outputs/apk/release/app-release.apk XyonMusic-${{ github.run_number }}-r8.apk
       - uses: actions/upload-artifact@v4
