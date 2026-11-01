@@ -33,7 +33,9 @@ jobs:
       - name: Assemble release (R8)
         env:
           ANDROID_HOME: /usr/local/lib/android/sdk
-        run: gradle :app:assembleRelease 2>&1 | tee build.log
+        run: |
+          set -o pipefail
+          gradle :app:assembleRelease 2>&1 | tee build.log
       - name: Errores de compilación
         if: failure()
         run: |

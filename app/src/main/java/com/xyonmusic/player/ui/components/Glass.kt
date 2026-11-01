@@ -19,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -48,9 +49,9 @@ fun Modifier.liquidGlass(shape: Shape, dark: Boolean = true): Modifier = this
         shape
     )
 
-fun Modifier.noRippleClick(onClick: () -> Unit): Modifier = this.then(
-    Modifier.clickable(remember { MutableInteractionSource() }, indication = null, onClick = onClick)
-)
+fun Modifier.noRippleClick(onClick: () -> Unit): Modifier = composed {
+    clickable(remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+}
 
 /** Large title de iOS ("Home") con icono de dispositivo y avatar (abre Ajustes). */
 @Composable
