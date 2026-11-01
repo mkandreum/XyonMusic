@@ -96,17 +96,17 @@ fun LibraryScreen(
             }
             if (likedOpen) items(liked, key = { "liked-" + it.uri }) { t ->
                 Row(
-                    Modifier.fillMaxWidth().clickable { vm.playSpotify(sp.liked, sp.liked.indexOf(t)) }.padding(12.dp),
+                    Modifier.fillMaxWidth().clickable { vm.playSpotify(sp.liked, sp.liked.indexOf(t)) }.padding(horizontal = 16.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    AsyncImage(t.image, t.name, modifier = Modifier.size(52.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.secondaryContainer), contentScale = ContentScale.Crop)
+                    AsyncImage(t.image, t.name, modifier = Modifier.size(50.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.secondaryContainer), contentScale = ContentScale.Crop)
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(t.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge)
                         Text(t.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                HorizontalDivider()
+                HorizontalDivider(Modifier.padding(start = 78.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
             }
         }
         if (query.isBlank()) {
@@ -122,7 +122,7 @@ fun LibraryScreen(
         }
         items(filtered, key = { it.contentUri.toString() }) { s: Song ->
             SongRow(s, playing = ui.songs.getOrNull(ui.index) == s, onClick = { vm.play(filtered, filtered.indexOf(s)) })
-            HorizontalDivider()
+            HorizontalDivider(Modifier.padding(start = 78.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
         }
     }
 }

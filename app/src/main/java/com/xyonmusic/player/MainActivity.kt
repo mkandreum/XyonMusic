@@ -156,15 +156,17 @@ fun XyonApp(vm: PlayerViewModel, dark: Boolean, onToggleTheme: () -> Unit, modif
             Column {
                 AnimatedVisibility(visible = current != null && !expanded) {
                     Row(
-                        Modifier.fillMaxWidth().clickable { expanded = true }
-                            .background(MaterialTheme.colorScheme.surfaceVariant).padding(8.dp),
+                        Modifier.padding(horizontal = 8.dp, vertical = 6.dp).fillMaxWidth()
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .clickable { expanded = true }.padding(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         AsyncImage(current?.artUri ?: current?.contentUri, null, modifier = Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop)
                         Spacer(Modifier.width(8.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(current?.title ?: current?.name ?: "", maxLines = 1, style = MaterialTheme.typography.bodyMedium)
-                            Text(current?.artist ?: "", maxLines = 1, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(current?.title ?: current?.name ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold))
+                            Text(current?.artist ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         IconButton({ vm.prev() }) { Icon(Icons.Filled.SkipPrevious, null) }
                         IconButton({ vm.toggle() }) { Icon(if (ui.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, null) }
@@ -196,7 +198,7 @@ fun XyonApp(vm: PlayerViewModel, dark: Boolean, onToggleTheme: () -> Unit, modif
             ModalBottomSheet(onDismissRequest = { album = null }) {
                 Column(Modifier.padding(16.dp, 0.dp, 16.dp, 32.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        AsyncImage(a.artUri, null, modifier = Modifier.size(72.dp).clip(RoundedCornerShape(16.dp)), contentScale = ContentScale.Crop)
+                        AsyncImage(a.artUri, null, modifier = Modifier.size(96.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant), contentScale = ContentScale.Crop)
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(a.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
