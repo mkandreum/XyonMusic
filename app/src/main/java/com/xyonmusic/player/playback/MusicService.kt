@@ -1,16 +1,16 @@
 package com.xyonmusic.player.playback
 
+import android.net.Uri
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.xyonmusic.player.data.Song
 
-// FIX WebView: usaba <audio> HTML + MusicService desconectado (broadcast STATE_UPDATE
-// que el JS nunca escuchaba). Fondo se cortaba al bloquear, sin notificación ni audio-focus.
-// Nativa: ExoPlayer real en MediaSessionService, conectado a la UI por MediaController.
+// ExoPlayer en MediaSessionService: notificación, audio-focus y reproducción en segundo plano.
 class MusicService : MediaSessionService() {
     private var session: MediaSession? = null
     private lateinit var player: ExoPlayer
@@ -26,6 +26,11 @@ class MusicService : MediaSessionService() {
 
     override fun onGetSession(info: MediaSession.ControllerInfo) = session
 
+    override fun onTaskRemoved(rootIntent: android.content.Intent?) {
+        val p = session?.player
+        if (p == null || !p.playWhenReady || p.mediaItemCount == 0) stopSelf()
+    }
+
     override fun onDestroy() {
         session?.run { player.release(); release() }
         session = null
@@ -34,14 +39,13 @@ class MusicService : MediaSessionService() {
 
     companion object {
         fun Song.toMediaItem(): MediaItem = MediaItem.Builder()
-            .setUri(contentUri)
-            .setMediaId(contentUri.toString())
+            .setUri(Uri.parse(uri))
+            .setMediaId(uri)
             .setMediaMetadata(
-                androidx.media3.common.MediaMetadata.Builder()
-                    .setTitle(title ?: name)
+                MediaMetadata.Builder()
+                    .setTitle(title)
                     .setArtist(artist)
                     .setAlbumTitle(album)
-                    .setArtworkUri(artUri)
                     .build()
             ).build()
     }

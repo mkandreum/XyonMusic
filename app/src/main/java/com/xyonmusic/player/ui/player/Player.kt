@@ -1,8 +1,9 @@
 package com.xyonmusic.player.ui.player
 
+import android.content.res.Configuration
+import android.os.Build
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -17,6 +18,7 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -26,28 +28,30 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.automirrored.rounded.QueueMusic
+import androidx.compose.material.icons.rounded.*
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -58,8 +62,12 @@ import androidx.media3.common.Player
 import coil.compose.AsyncImage
 import com.xyonmusic.player.PlayerViewModel
 import com.xyonmusic.player.data.Lyrics
-import com.xyonmusic.player.formatMs
+import com.xyonmusic.player.data.Song
+import com.xyonmusic.player.data.formatTime
 import com.xyonmusic.player.ui.components.*
+import com.xyonmusic.player.ui.theme.BlobsBackground
+import com.xyonmusic.player.ui.theme.LocalXyon
+import com.xyonmusic.player.ui.theme.glass
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -67,306 +75,268 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 // =============================================================================
-// Reproductor a pantalla completa
+// Reproductor a pantalla completa ("Reproduciendo")
 // =============================================================================
 @Composable
-fun FullPlayer(vm: PlayerViewModel, onCollapse: () -> Unit) {
-    val ui by vm.ui.collectAsStateWithLifecycle()
-    val s = ui.current ?: return
-    val haptics = rememberHaptics()
+fun FullPlayer(vm: PlayerViewModel, onClose: () -> Unit, onGoAlbum: (Song) -> Unit, onGoArtist: (Song) -> Unit) {
+    val c = LocalXyon.current
+    val pl by vm.player.collectAsStateWithLifecycle()
+    val s = pl.current ?: return
+    val h = rememberHaptics()
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
-    val colors = rememberArtColors(s.artUri)
+    val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val screenH = with(LocalDensity.current) { LocalConfiguration.current.screenHeightDp.dp.toPx() }
-
-    // Deslizar hacia abajo para cerrar
     val dragY = remember { Animatable(0f) }
+    var menu by remember { mutableStateOf(false) }
     var showQueue by remember { mutableStateOf(false) }
-    var showLyrics by rememberSaveable { mutableStateOf(false) }
-    val lyrics by produceState<String?>(null, s.contentUri) {
-        value = withContext(Dispatchers.IO) { Lyrics.read(ctx, s.contentUri) }
+    var showLyrics by remember { mutableStateOf(false) }
+    val lyrics by produceState<String?>(null, s.uri) {
+        value = withContext(Dispatchers.IO) { Lyrics.read(ctx, android.net.Uri.parse(s.uri)) }
     }
 
     Box(
         Modifier.fillMaxSize()
             .offset { IntOffset(0, dragY.value.roundToInt()) }
-            .graphicsLayer {
-                val f = (dragY.value / screenH).coerceIn(0f, 1f)
-                scaleX = 1f - f * 0.08f; scaleY = scaleX
-            }
-            .clip(RoundedCornerShape(((dragY.value / screenH) * 120f).coerceIn(0f, 32f).dp))
-            .animatedArtBackground(colors)
+            .clip(RoundedCornerShape(((dragY.value / screenH) * 140f).coerceIn(0f, 32f).dp))
+            .background(c.bg)
+            .clickable(remember { MutableInteractionSource() }, null) {}
             .pointerInput(Unit) {
+                // Deslizar hacia abajo para cerrar
                 detectVerticalDragGestures(
                     onDragEnd = {
                         scope.launch {
-                            if (dragY.value > screenH * 0.22f) { haptics.confirm(); onCollapse(); dragY.snapTo(0f) }
-                            else dragY.animateTo(0f, spring(dampingRatio = 0.7f))
+                            if (dragY.value > screenH * 0.2f) { h.confirm(); onClose(); dragY.snapTo(0f) }
+                            else dragY.animateTo(0f, spring(dampingRatio = 0.72f))
                         }
                     },
                     onDragCancel = { scope.launch { dragY.animateTo(0f) } }
-                ) { ch, dy ->
-                    ch.consume()
-                    scope.launch { dragY.snapTo((dragY.value + dy).coerceAtLeast(0f)) }
-                }
+                ) { ch, dy -> ch.consume(); scope.launch { dragY.snapTo((dragY.value + dy).coerceAtLeast(0f)) } }
             }
-            .pointerInput(Unit) { detectTapGestures { } } // no dejar pasar toques al contenido de detrás
     ) {
-        Column(
-            Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(horizontal = 26.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            // Asa + cerrar
-            Box(Modifier.fillMaxWidth().padding(top = 8.dp), contentAlignment = Alignment.Center) {
-                Box(Modifier.width(38.dp).height(5.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.45f)))
-                Icon(
-                    Icons.Filled.KeyboardArrowDown, "Cerrar", tint = Color.White,
-                    modifier = Modifier.align(Alignment.CenterStart).size(34.dp).bounceClick { haptics.tap(); onCollapse() }
-                )
-            }
-            Spacer(Modifier.weight(0.12f))
+        BlobsBackground()
+        val blur = if (Build.VERSION.SDK_INT >= 31) Modifier.blur(80.dp) else Modifier.graphicsLayer { alpha = 0.35f }
+        Art(s.uri, Modifier.fillMaxSize().then(blur).graphicsLayer { alpha = 0.9f })
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(c.bg.copy(alpha = 0.35f), c.bg.copy(alpha = 0.85f)))))
 
-            // Carátula / letra
-            AnimatedContent(
-                targetState = showLyrics && lyrics != null,
-                transitionSpec = { fadeIn(tween(260)) togetherWith fadeOut(tween(200)) },
-                label = "art-lyrics",
-                modifier = Modifier.fillMaxWidth().aspectRatio(1f)
-            ) { lyr ->
-                if (lyr) LyricsView(lyrics.orEmpty())
-                else SwipeableArt(s.artUri ?: s.contentUri, ui.playing, haptics, onNext = { vm.next() }, onPrev = { vm.prev() })
-            }
-            Spacer(Modifier.weight(0.1f))
-
-            // Título
-            AnimatedContent(s, transitionSpec = { fadeIn(tween(250)) togetherWith fadeOut(tween(150)) }, label = "title") { song ->
-                Column(Modifier.fillMaxWidth()) {
-                    Text(song.title ?: song.name, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(
-                        listOfNotNull(song.artist ?: "Artista desconocido", song.album).joinToString(" — "),
-                        color = Color.White.copy(alpha = 0.7f), fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-            Spacer(Modifier.height(18.dp))
-            SeekBar(ui.posMs, ui.durMs, haptics, onSeek = { vm.seek(it) })
-            Spacer(Modifier.height(14.dp))
-
-            // Controles principales
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.SkipPrevious, "Anterior", tint = Color.White, modifier = Modifier.size(52.dp).bounceClick { haptics.confirm(); vm.prev() })
-                Box(
-                    Modifier.size(78.dp).clip(CircleShape).background(Color.White)
-                        .bounceClick(0.84f) { haptics.confirm(); vm.toggle() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    AnimatedContent(
-                        ui.playing,
-                        transitionSpec = { (scaleIn(spring(dampingRatio = 0.5f)) + fadeIn()) togetherWith (scaleOut() + fadeOut()) },
-                        label = "pp"
-                    ) { playing ->
-                        Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (playing) "Pausa" else "Reproducir", tint = Color.Black, modifier = Modifier.size(44.dp))
+        Column(Modifier.fillMaxSize().systemBarsPadding().padding(horizontal = 24.dp, vertical = 12.dp)) {
+            // Cabecera
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                IconBtn(Icons.Rounded.KeyboardArrowDown, 32, onClose)
+                Text("Reproduciendo", Modifier.weight(1f), color = c.text2, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+                Box {
+                    IconBtn(Icons.Rounded.MoreHoriz, 28, { menu = true })
+                    DropdownMenu(menu, { menu = false }) {
+                        DropdownMenuItem({ Text("Ir al álbum") }, { menu = false; onGoAlbum(s) }, leadingIcon = { Icon(Icons.Rounded.Album, null) })
+                        DropdownMenuItem({ Text("Ir al artista") }, { menu = false; onGoArtist(s) }, leadingIcon = { Icon(Icons.Rounded.Person, null) })
+                        DropdownMenuItem({ Text("A continuación") }, { menu = false; showQueue = true }, leadingIcon = { Icon(Icons.AutoMirrored.Rounded.QueueMusic, null) })
+                        if (lyrics != null) DropdownMenuItem(
+                            { Text(if (showLyrics) "Ver carátula" else "Ver letra") }, { menu = false; showLyrics = !showLyrics },
+                            leadingIcon = { Icon(Icons.Rounded.Lyrics, null) }
+                        )
                     }
                 }
-                Icon(Icons.Filled.SkipNext, "Siguiente", tint = Color.White, modifier = Modifier.size(52.dp).bounceClick { haptics.confirm(); vm.next() })
             }
-            Spacer(Modifier.height(18.dp))
-
-            // Controles secundarios
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                val on = Color.White; val off = Color.White.copy(alpha = 0.5f)
-                Icon(Icons.Filled.Shuffle, "Aleatorio", tint = if (ui.shuffle) on else off, modifier = Modifier.size(26.dp).bounceClick { haptics.tap(); vm.toggleShuffle() })
-                Icon(
-                    Icons.Filled.Lyrics, "Letra", tint = if (showLyrics && lyrics != null) on else if (lyrics == null) off.copy(alpha = 0.25f) else off,
-                    modifier = Modifier.size(26.dp).bounceClick { haptics.tap(); if (lyrics != null) showLyrics = !showLyrics }
-                )
-                Icon(Icons.AutoMirrored.Filled.QueueMusic, "A continuación", tint = off, modifier = Modifier.size(28.dp).bounceClick { haptics.tap(); showQueue = true })
-                Icon(
-                    if (ui.repeat == Player.REPEAT_MODE_ONE) Icons.Filled.RepeatOne else Icons.Filled.Repeat, "Repetir",
-                    tint = if (ui.repeat != Player.REPEAT_MODE_OFF) on else off,
-                    modifier = Modifier.size(26.dp).bounceClick { haptics.tap(); vm.cycleRepeat() }
-                )
+            if (landscape) {
+                Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.fillMaxHeight(0.9f).aspectRatio(1f)) { ArtOrLyrics(s, pl.playing, showLyrics, lyrics, h, vm) }
+                    Spacer(Modifier.width(32.dp))
+                    Column(Modifier.weight(1f)) { Controls(vm, s) }
+                }
+            } else {
+                Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                    Box(Modifier.widthIn(max = 360.dp).fillMaxWidth().aspectRatio(1f)) { ArtOrLyrics(s, pl.playing, showLyrics, lyrics, h, vm) }
+                    Spacer(Modifier.height(16.dp))
+                    Controls(vm, s)
+                }
             }
-            Spacer(Modifier.weight(0.14f))
         }
     }
-    if (showQueue) QueueSheet(vm, haptics) { showQueue = false }
+    if (showQueue) QueueSheet(vm, h) { showQueue = false }
 }
 
-/** Carátula que respira con la reproducción y se desliza a los lados para cambiar de canción. */
 @Composable
-private fun SwipeableArt(model: Any?, playing: Boolean, haptics: Haptics, onNext: () -> Unit, onPrev: () -> Unit) {
+private fun ArtOrLyrics(s: Song, playing: Boolean, showLyrics: Boolean, lyrics: String?, h: Haptics, vm: PlayerViewModel) {
+    val c = LocalXyon.current
+    AnimatedContent(showLyrics && lyrics != null, transitionSpec = { fadeIn(tween(260)) togetherWith fadeOut(tween(200)) }, label = "al") { lyr ->
+        if (lyr) Box(Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp)).glass(RoundedCornerShape(16.dp), c)) {
+            Text(lyrics.orEmpty(), Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), color = c.text, fontSize = 19.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold)
+        } else SwipeArt(s, playing, h, onNext = { vm.next() }, onPrev = { vm.previous() })
+    }
+}
+
+/** Carátula con sombra; se encoge al pausar y se desliza a los lados para cambiar de canción. */
+@Composable
+private fun SwipeArt(s: Song, playing: Boolean, h: Haptics, onNext: () -> Unit, onPrev: () -> Unit) {
     val scope = rememberCoroutineScope()
     val dx = remember { Animatable(0f) }
-    val scale by animateFloatAsState(if (playing) 1f else 0.82f, spring(dampingRatio = 0.55f, stiffness = 260f), label = "art")
-    val elev by animateDpAsState(if (playing) 28.dp else 8.dp, label = "elev")
-    BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    val scale by animateFloatAsState(if (playing) 1f else 0.88f, spring(dampingRatio = 0.6f, stiffness = 260f), label = "artScale")
+    BoxWithConstraints(Modifier.fillMaxSize()) {
         val w = constraints.maxWidth.toFloat()
         Box(
             Modifier.fillMaxSize()
                 .graphicsLayer {
-                    translationX = dx.value
-                    rotationZ = dx.value / w * 6f
-                    scaleX = scale * (1f - abs(dx.value) / w * 0.1f); scaleY = scaleX
-                    alpha = 1f - (abs(dx.value) / w).coerceIn(0f, 0.6f)
+                    translationX = dx.value; rotationZ = dx.value / w * 5f
+                    scaleX = scale; scaleY = scale; alpha = 1f - (abs(dx.value) / w).coerceIn(0f, 0.6f)
                 }
-                .shadow(elev, RoundedCornerShape(16.dp))
+                .shadow(30.dp, RoundedCornerShape(16.dp))
                 .clip(RoundedCornerShape(16.dp))
-                .background(Color.White.copy(alpha = 0.08f))
                 .pointerInput(Unit) {
                     detectHorizontalDragGestures(
                         onDragEnd = {
                             scope.launch {
                                 val v = dx.value
                                 if (abs(v) > w * 0.28f) {
-                                    haptics.confirm()
-                                    dx.animateTo(if (v < 0) -w else w, tween(160))
+                                    h.confirm()
+                                    dx.animateTo(if (v < 0) -w else w, tween(150))
                                     if (v < 0) onNext() else onPrev()
-                                    dx.snapTo(if (v < 0) w * 0.6f else -w * 0.6f)
+                                    dx.snapTo(if (v < 0) w * 0.5f else -w * 0.5f)
                                 }
-                                dx.animateTo(0f, spring(dampingRatio = 0.72f, stiffness = 380f))
+                                dx.animateTo(0f, spring(dampingRatio = 0.75f, stiffness = 380f))
                             }
                         },
                         onDragCancel = { scope.launch { dx.animateTo(0f) } }
                     ) { ch, d -> ch.consume(); scope.launch { dx.snapTo(dx.value + d) } }
                 }
-        ) {
-            Icon(Icons.Filled.MusicNote, null, tint = Color.White.copy(alpha = 0.35f), modifier = Modifier.align(Alignment.Center).size(72.dp))
-            AsyncImage(model, null, Modifier.matchParentSize(), contentScale = ContentScale.Crop)
+        ) { Art(s.uri, Modifier.fillMaxSize()) }
+    }
+}
+
+@Composable
+private fun Controls(vm: PlayerViewModel, s: Song) {
+    val c = LocalXyon.current
+    val pl by vm.player.collectAsStateWithLifecycle()
+    val h = rememberHaptics()
+    AnimatedContent(s, transitionSpec = { fadeIn(tween(250)) togetherWith fadeOut(tween(150)) }, label = "title") { song ->
+        Column(Modifier.fillMaxWidth()) {
+            Text(song.title, Modifier.fillMaxWidth(), color = c.text, fontSize = 26.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(song.artist, Modifier.fillMaxWidth(), color = c.text2, fontSize = 17.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
     }
-}
-
-@Composable
-private fun LyricsView(text: String) {
-    Box(
-        Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp)).background(Color.Black.copy(alpha = 0.18f))
-    ) {
-        Text(
-            text,
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
-            color = Color.White, fontSize = 19.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold
-        )
+    Spacer(Modifier.height(16.dp))
+    SeekBar(pl.posMs, pl.durMs, h) { vm.seekTo(it) }
+    Spacer(Modifier.height(18.dp))
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+        ToggleBtn(Icons.Rounded.Shuffle, pl.shuffle) { h.tap(); vm.toggleShuffle() }
+        IconBtn(Icons.Rounded.SkipPrevious, 40, { h.confirm(); vm.previous() })
+        Box(
+            Modifier.size(76.dp).shadow(14.dp, CircleShape, spotColor = c.accent, ambientColor = c.accent)
+                .clip(CircleShape).background(c.accent).bounceClick(0.86f) { h.confirm(); vm.togglePlay() },
+            contentAlignment = Alignment.Center
+        ) {
+            AnimatedContent(pl.playing, transitionSpec = { (scaleIn(spring(dampingRatio = 0.5f)) + fadeIn()) togetherWith (scaleOut() + fadeOut()) }, label = "pp") { p ->
+                Icon(if (p) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, null, Modifier.size(44.dp), tint = Color.White)
+            }
+        }
+        IconBtn(Icons.Rounded.SkipNext, 40, { h.confirm(); vm.next() })
+        ToggleBtn(if (pl.repeat == Player.REPEAT_MODE_ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat, pl.repeat != Player.REPEAT_MODE_OFF) { h.tap(); vm.cycleRepeat() }
     }
 }
 
-// =============================================================================
-// Barra de progreso: se ensancha al tocarla, muestra el tiempo grande y vibra.
-// =============================================================================
+/** Barra de progreso de la original (pista 6dp, botón blanco 16dp) con vibración al arrastrar. */
 @Composable
-fun SeekBar(pos: Long, dur: Long, haptics: Haptics, onSeek: (Long) -> Unit, modifier: Modifier = Modifier) {
+private fun SeekBar(pos: Long, dur: Long, h: Haptics, onSeek: (Long) -> Unit) {
+    val c = LocalXyon.current
     var dragging by remember { mutableStateOf(false) }
     var frac by remember { mutableFloatStateOf(0f) }
     var lastStep by remember { mutableIntStateOf(-1) }
     var atEdge by remember { mutableStateOf(false) }
     val shown = if (dragging) frac else if (dur > 0) (pos.toFloat() / dur).coerceIn(0f, 1f) else 0f
-    val barH by animateDpAsState(if (dragging) 12.dp else 5.dp, spring(dampingRatio = 0.6f), label = "barH")
-    val timeSize by animateFloatAsState(if (dragging) 17f else 12f, label = "ts")
-
-    fun update(nf: Float) {
-        val step = (nf * 24).toInt()
-        val edge = nf <= 0f || nf >= 1f
-        if (edge && !atEdge) haptics.edge() else if (step != lastStep && !edge) haptics.tick()
-        lastStep = step; atEdge = edge; frac = nf
-    }
-
-    Column(modifier.fillMaxWidth()) {
-        Box(
-            Modifier.fillMaxWidth().height(30.dp)
-                .pointerInput(dur) {
-                    detectTapGestures { o -> haptics.tick(); onSeek(((o.x / size.width).coerceIn(0f, 1f) * dur).toLong()) }
-                }
+    val thumb by animateFloatAsState(if (dragging) 1.35f else 1f, label = "thumb")
+    Column(Modifier.fillMaxWidth()) {
+        BoxWithConstraints(
+            Modifier.fillMaxWidth().height(28.dp)
+                .pointerInput(dur) { detectTapGestures { o -> h.tick(); onSeek(((o.x / size.width).coerceIn(0f, 1f) * dur).toLong()) } }
                 .pointerInput(dur) {
                     detectHorizontalDragGestures(
-                        onDragStart = { o -> dragging = true; frac = (o.x / size.width).coerceIn(0f, 1f); lastStep = (frac * 24).toInt(); haptics.tap() },
+                        onDragStart = { o -> dragging = true; frac = (o.x / size.width).coerceIn(0f, 1f); lastStep = (frac * 24).toInt(); h.tap() },
                         onDragEnd = { onSeek((frac * dur).toLong()); dragging = false },
                         onDragCancel = { dragging = false }
-                    ) { ch, dx -> ch.consume(); update((frac + dx / size.width).coerceIn(0f, 1f)) }
+                    ) { ch, dx ->
+                        ch.consume()
+                        val nf = (frac + dx / size.width).coerceIn(0f, 1f)
+                        val step = (nf * 24).toInt(); val edge = nf <= 0f || nf >= 1f
+                        if (edge && !atEdge) h.edge() else if (step != lastStep && !edge) h.tick()
+                        lastStep = step; atEdge = edge; frac = nf
+                    }
                 },
             contentAlignment = Alignment.CenterStart
         ) {
-            Box(Modifier.fillMaxWidth().height(barH).clip(CircleShape).background(Color.White.copy(alpha = 0.25f)))
-            Box(Modifier.fillMaxWidth(shown).height(barH).clip(CircleShape).background(Color.White.copy(alpha = if (dragging) 1f else 0.85f)))
+            val w = maxWidth
+            Box(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(c.text.copy(alpha = 0.18f))) {
+                Box(Modifier.fillMaxWidth(shown).fillMaxHeight().background(c.accent))
+            }
+            Box(
+                Modifier.offset(x = w * shown - 8.dp).size(16.dp).graphicsLayer { scaleX = thumb; scaleY = thumb }
+                    .shadow(3.dp, CircleShape).background(Color.White, CircleShape)
+            )
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             val p = if (dragging) (frac * dur).toLong() else pos
-            Text(formatMs(p), color = Color.White.copy(alpha = if (dragging) 1f else 0.6f), fontSize = timeSize.sp, fontWeight = if (dragging) FontWeight.Bold else FontWeight.Normal)
-            Text("-" + formatMs((dur - p).coerceAtLeast(0)), color = Color.White.copy(alpha = 0.6f), fontSize = timeSize.sp)
+            Text(formatTime(p), color = if (dragging) c.text else c.text2, fontSize = 13.sp, fontWeight = if (dragging) FontWeight.Bold else FontWeight.Normal)
+            Text(formatTime(dur), color = c.text2, fontSize = 13.sp)
         }
     }
 }
 
 // =============================================================================
-// Cola "A continuación": tocar para saltar, arrastrar el asa para reordenar.
+// Cola "A continuación": tocar para saltar, arrastrar ≡ para reordenar
 // =============================================================================
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun QueueSheet(vm: PlayerViewModel, haptics: Haptics, onDismiss: () -> Unit) {
-    val ui by vm.ui.collectAsStateWithLifecycle()
+private fun QueueSheet(vm: PlayerViewModel, h: Haptics, onDismiss: () -> Unit) {
+    val c = LocalXyon.current
+    val pl by vm.player.collectAsStateWithLifecycle()
     val rowH = 64.dp
     val rowPx = with(LocalDensity.current) { rowH.toPx() }
     var dragFrom by remember { mutableIntStateOf(-1) }
     var dragDy by remember { mutableFloatStateOf(0f) }
     var lastTarget by remember { mutableIntStateOf(-1) }
-    val listState = rememberLazyListState(initialFirstVisibleItemIndex = ui.index.coerceAtLeast(0))
-    val target = if (dragFrom >= 0) (dragFrom + (dragDy / rowPx).roundToInt()).coerceIn(0, ui.queue.lastIndex) else -1
-
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Text("A continuación", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(20.dp, 0.dp, 20.dp, 4.dp))
-        Text(
-            "${ui.queue.size} canciones · arrastra ≡ para reordenar",
-            color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.padding(horizontal = 20.dp)
-        )
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = pl.index.coerceAtLeast(0))
+    val target = if (dragFrom >= 0) (dragFrom + (dragDy / rowPx).roundToInt()).coerceIn(0, pl.queue.lastIndex) else -1
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = c.surface) {
+        Text("A continuación", Modifier.padding(horizontal = 20.dp), color = c.text, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Text("${pl.queue.size} canciones · arrastra ≡ para reordenar", Modifier.padding(horizontal = 20.dp), color = c.text2, fontSize = 13.sp)
         Spacer(Modifier.height(8.dp))
         LazyColumn(state = listState, modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
-            itemsIndexed(ui.queue, key = { i, s -> "$i|${s.contentUri}" }) { i, s ->
-                val isDragged = i == dragFrom
+            itemsIndexed(pl.queue, key = { i, s -> "$i|${s.uri}" }) { i, s ->
+                val dragged = i == dragFrom
                 val shift = when {
-                    dragFrom < 0 || isDragged -> 0f
+                    dragFrom < 0 || dragged -> 0f
                     i in (dragFrom + 1)..target -> -rowPx
                     i in target until dragFrom -> rowPx
                     else -> 0f
                 }
-                val animShift by animateFloatAsState(shift, spring(stiffness = 600f), label = "shift")
+                val anim by animateFloatAsState(shift, spring(stiffness = 600f), label = "q")
                 Row(
-                    Modifier.fillMaxWidth().height(rowH)
-                        .zIndex(if (isDragged) 1f else 0f)
-                        .graphicsLayer {
-                            translationY = if (isDragged) dragDy else animShift
-                            if (isDragged) { scaleX = 1.03f; scaleY = 1.03f; shadowElevation = 16f }
-                        }
-                        .background(if (isDragged) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
-                        .clickable { haptics.tap(); vm.skipTo(i) }
-                        .padding(horizontal = 16.dp),
+                    Modifier.fillMaxWidth().height(rowH).zIndex(if (dragged) 1f else 0f)
+                        .graphicsLayer { translationY = if (dragged) dragDy else anim; if (dragged) { scaleX = 1.03f; scaleY = 1.03f } }
+                        .background(if (dragged) c.placeholder else Color.Transparent)
+                        .clickable { h.tap(); vm.skipTo(i) }.padding(horizontal = 16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    AsyncImage(s.artUri, null, Modifier.size(46.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.secondaryContainer), contentScale = ContentScale.Crop)
+                    Art(s.uri, Modifier.size(46.dp).clip(RoundedCornerShape(8.dp)))
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(
-                            s.title ?: s.name, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            color = if (i == ui.index) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                            fontWeight = if (i == ui.index) FontWeight.SemiBold else FontWeight.Normal
-                        )
-                        Text(s.artist ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                        Text(s.title, color = if (i == pl.index) c.accent else c.text, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(s.artist, color = c.text2, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                    if (i == ui.index) EqualizerBars(ui.playing, MaterialTheme.colorScheme.primary, Modifier.padding(end = 12.dp))
+                    if (i == pl.index) PlayingIcon(pl.playing)
                     Icon(
-                        Icons.Filled.DragHandle, "Reordenar", tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(40.dp).padding(8.dp).pointerInput(i, ui.queue.size) {
+                        Icons.Rounded.DragHandle, "Reordenar", tint = c.text2,
+                        modifier = Modifier.size(44.dp).padding(10.dp).pointerInput(i, pl.queue.size) {
                             detectDragGestures(
-                                onDragStart = { dragFrom = i; dragDy = 0f; lastTarget = i; haptics.long() },
+                                onDragStart = { dragFrom = i; dragDy = 0f; lastTarget = i; h.long() },
                                 onDragEnd = {
-                                    val t = (dragFrom + (dragDy / rowPx).roundToInt()).coerceIn(0, ui.queue.lastIndex)
-                                    if (t != dragFrom) { vm.moveInQueue(dragFrom, t); haptics.confirm() }
+                                    val t = (dragFrom + (dragDy / rowPx).roundToInt()).coerceIn(0, pl.queue.lastIndex)
+                                    if (t != dragFrom) { vm.moveInQueue(dragFrom, t); h.confirm() }
                                     dragFrom = -1; dragDy = 0f
                                 },
                                 onDragCancel = { dragFrom = -1; dragDy = 0f }
                             ) { ch, d ->
                                 ch.consume(); dragDy += d.y
-                                val t = (dragFrom + (dragDy / rowPx).roundToInt()).coerceIn(0, ui.queue.lastIndex)
-                                if (t != lastTarget) { lastTarget = t; haptics.tick() }
+                                val t = (dragFrom + (dragDy / rowPx).roundToInt()).coerceIn(0, pl.queue.lastIndex)
+                                if (t != lastTarget) { lastTarget = t; h.tick() }
                             }
                         }
                     )
@@ -377,81 +347,67 @@ private fun QueueSheet(vm: PlayerViewModel, haptics: Haptics, onDismiss: () -> U
 }
 
 // =============================================================================
-// Mini reproductores (local y Spotify)
+// Mini reproductores (58dp, cristal) — local y Spotify
 // =============================================================================
 @Composable
-fun MiniPlayer(vm: PlayerViewModel, onOpen: () -> Unit, modifier: Modifier = Modifier) {
-    val ui by vm.ui.collectAsStateWithLifecycle()
-    val s = ui.current ?: return
-    val haptics = rememberHaptics()
+fun MiniPlayer(vm: PlayerViewModel, onOpen: () -> Unit) {
+    val c = LocalXyon.current
+    val pl by vm.player.collectAsStateWithLifecycle()
+    val s = pl.current ?: return
+    val h = rememberHaptics()
     var drag by remember { mutableFloatStateOf(0f) }
-    Column(
-        modifier.padding(horizontal = 8.dp, vertical = 6.dp).fillMaxWidth()
+    val shape = RoundedCornerShape(20.dp)
+    Box(
+        Modifier.fillMaxWidth().height(58.dp)
             .graphicsLayer { translationY = drag.coerceAtMost(0f) * 0.4f }
-            .shadow(10.dp, RoundedCornerShape(18.dp))
-            .clip(RoundedCornerShape(18.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.94f))
+            .clip(shape).background(c.surface.copy(alpha = if (c.isLight) 0.55f else 0.45f)).glass(shape, c)
             .pointerInput(Unit) {
-                // Deslizar hacia arriba para abrir el reproductor
-                detectVerticalDragGestures(onDragEnd = { if (drag < -60f) { haptics.tap(); onOpen() }; drag = 0f }, onDragCancel = { drag = 0f }) { ch, dy ->
-                    ch.consume(); drag += dy
-                }
+                detectVerticalDragGestures(onDragEnd = { if (drag < -50f) { h.tap(); onOpen() }; drag = 0f }, onDragCancel = { drag = 0f }) { ch, dy -> ch.consume(); drag += dy }
             }
-            .clickable { haptics.tap(); onOpen() }
+            .bounceClick(0.98f) { h.tap(); onOpen() }
     ) {
-        Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            AsyncImage(s.artUri ?: s.contentUri, null, Modifier.size(46.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.secondaryContainer), contentScale = ContentScale.Crop)
-            Spacer(Modifier.width(10.dp))
+        Row(Modifier.fillMaxSize().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Art(s.uri, Modifier.size(42.dp).clip(RoundedCornerShape(6.dp)))
+            Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(s.title ?: s.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold))
-                Text(s.artist ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(s.title, color = c.text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(s.artist, color = c.text2, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Icon(Icons.Filled.SkipPrevious, "Anterior", Modifier.size(40.dp).padding(6.dp).bounceClick { haptics.confirm(); vm.prev() })
-            Box(Modifier.size(40.dp).bounceClick(0.8f) { haptics.confirm(); vm.toggle() }, contentAlignment = Alignment.Center) {
-                AnimatedContent(ui.playing, transitionSpec = { scaleIn() + fadeIn() togetherWith scaleOut() + fadeOut() }, label = "mini-pp") { p ->
-                    Icon(if (p) Icons.Filled.Pause else Icons.Filled.PlayArrow, null, Modifier.size(30.dp))
-                }
-            }
-            Icon(Icons.Filled.SkipNext, "Siguiente", Modifier.size(40.dp).padding(6.dp).bounceClick { haptics.confirm(); vm.next() })
+            IconBtn(if (pl.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, 30, { h.confirm(); vm.togglePlay() })
+            IconBtn(Icons.Rounded.SkipNext, 30, { h.confirm(); vm.next() })
         }
-        val prog = if (ui.durMs > 0) (ui.posMs.toFloat() / ui.durMs).coerceIn(0f, 1f) else 0f
-        Box(Modifier.padding(horizontal = 14.dp).padding(bottom = 6.dp).fillMaxWidth().height(2.dp).clip(CircleShape).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))) {
-            Box(Modifier.fillMaxWidth(prog).fillMaxHeight().background(MaterialTheme.colorScheme.primary))
+        val prog = if (pl.durMs > 0) (pl.posMs.toFloat() / pl.durMs).coerceIn(0f, 1f) else 0f
+        Box(Modifier.align(Alignment.BottomCenter).padding(horizontal = 14.dp).fillMaxWidth().height(2.dp).clip(RoundedCornerShape(1.dp)).background(c.text.copy(alpha = 0.12f))) {
+            Box(Modifier.fillMaxWidth(prog).fillMaxHeight().background(c.accent))
         }
     }
 }
 
 @Composable
-fun SpotifyMiniPlayer(vm: PlayerViewModel, modifier: Modifier = Modifier) {
+fun SpotifyMiniPlayer(vm: PlayerViewModel) {
+    val c = LocalXyon.current
     val sp by vm.sp.collectAsStateWithLifecycle()
     val n = sp.now ?: return
-    val haptics = rememberHaptics()
+    val h = rememberHaptics()
     val green = Color(0xFF1ED760)
+    val shape = RoundedCornerShape(20.dp)
     Row(
-        modifier.padding(horizontal = 8.dp, vertical = 6.dp).fillMaxWidth()
-            .shadow(10.dp, RoundedCornerShape(18.dp)).clip(RoundedCornerShape(18.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.94f))
-            .clickable { haptics.tap(); vm.spotify.openInSpotify(n.track.uri) }
-            .padding(8.dp),
+        Modifier.fillMaxWidth().height(58.dp).clip(shape).background(c.surface.copy(alpha = if (c.isLight) 0.55f else 0.45f)).glass(shape, c)
+            .bounceClick(0.98f) { h.tap(); vm.spotify.openInSpotify(n.track.uri) }.padding(horizontal = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box {
-            AsyncImage(n.track.image, null, Modifier.size(46.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.secondaryContainer), contentScale = ContentScale.Crop)
+            AsyncImage(n.track.image, null, Modifier.size(42.dp).clip(RoundedCornerShape(6.dp)).background(c.placeholder))
             Box(Modifier.align(Alignment.BottomEnd).offset(4.dp, 4.dp).size(16.dp).clip(CircleShape).background(green), contentAlignment = Alignment.Center) {
                 EqualizerBars(n.playing, Color.Black, size = 9.dp)
             }
         }
-        Spacer(Modifier.width(10.dp))
+        Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(n.track.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold))
-            Text("Spotify · ${n.track.artist}", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = green)
+            Text(n.track.name, color = c.text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("Spotify · ${n.track.artist}", color = green, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        Box(Modifier.size(40.dp).bounceClick(0.8f) { haptics.confirm(); vm.spotifyToggle() }, contentAlignment = Alignment.Center) {
-            AnimatedContent(n.playing, transitionSpec = { scaleIn() + fadeIn() togetherWith scaleOut() + fadeOut() }, label = "sp-pp") { p ->
-                Icon(if (p) Icons.Filled.Pause else Icons.Filled.PlayArrow, null, Modifier.size(30.dp))
-            }
-        }
-        Icon(Icons.Filled.SkipNext, "Siguiente", Modifier.size(40.dp).padding(6.dp).bounceClick { haptics.confirm(); vm.spotifyNext() })
+        IconBtn(if (n.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, 30, { h.confirm(); vm.spotifyToggle() })
+        IconBtn(Icons.Rounded.SkipNext, 30, { h.confirm(); vm.spotifyNext() })
     }
 }
-
