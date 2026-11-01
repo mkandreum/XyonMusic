@@ -69,6 +69,7 @@ fun CoverFlow(
     BoxWithConstraints(modifier.fillMaxSize().padding(bottom = bottomPadding)) {
         val cover: Dp = if (vertical) minOf(300.dp, maxWidth * 0.68f, maxHeight * 0.42f) else minOf(280.dp, maxHeight * 0.62f, maxWidth * 0.4f)
         val coverPx = with(density) { cover.toPx() }
+        val boxH = maxHeight
         // Vertical: hueco fijo de 64dp entre la portada central y la siguiente para el título.
         val spacing = if (vertical) coverPx * 0.5f + coverPx * 0.8f * 0.5f + with(density) { 64.dp.toPx() } else coverPx * 0.43f
         val tracker = remember { VelocityTracker() }
@@ -96,7 +97,7 @@ fun CoverFlow(
             val p = pos.value
             val first = floor(p - 4).toInt().coerceAtLeast(0)
             val last = (p + 4).toInt().coerceAtMost(albums.lastIndex)
-            val centerY = if (vertical) (maxHeight * 0.40f) else 0.dp
+            val centerY = if (vertical) (boxH * 0.40f) else 0.dp
             for (i in first..last) {
                 val a = albums[i]
                 val d = i - p
