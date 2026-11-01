@@ -17,7 +17,7 @@ import java.security.SecureRandom
 
 data class SpTrack(val uri: String, val name: String, val artist: String, val image: String?, val durationMs: Long)
 data class SpPlaylist(val id: String, val uri: String, val name: String, val owner: String, val image: String?, val total: Int)
-data class SpUser(val name: String, val image: String?, val premium: Boolean)
+data class SpUser(val id: String, val name: String, val image: String?, val premium: Boolean)
 
 /**
  * Integración Spotify vía Web API + OAuth Authorization Code con PKCE (sin client secret).
@@ -117,7 +117,7 @@ class Spotify(private val ctx: Context) {
 
     suspend fun me(): SpUser = withContext(Dispatchers.IO) {
         val j = getJson("/me")
-        SpUser(j.optString("display_name", "Spotify"), j.optJSONArray("images").firstImage(), j.optString("product") == "premium")
+        SpUser(j.optString("id"), j.optString("display_name", "Spotify"), j.optJSONArray("images").firstImage(), j.optString("product") == "premium")
     }
 
     suspend fun playlists(): List<SpPlaylist> = withContext(Dispatchers.IO) {
@@ -131,8 +131,18 @@ class Spotify(private val ctx: Context) {
         }
     }
 
+    /** Todas las "Canciones que te gustan", en el mismo orden que Spotify (más recientes primero). */
     suspend fun savedTracks(): List<SpTrack> = withContext(Dispatchers.IO) {
-        getJson("/me/tracks?limit=50").getJSONArray("items").objects().mapNotNull { it.optJSONObject("track")?.toTrack() }
+        val out = mutableListOf<SpTrack>()
+        var offset = 0
+        while (true) {
+            val j = getJson("/me/tracks?limit=50&offset=$offset")
+            val items = j.getJSONArray("items").objects()
+            items.mapNotNullTo(out) { it.optJSONObject("track")?.toTrack() }
+            offset += items.size
+            if (items.isEmpty() || j.isNull("next") || offset >= j.optInt("total")) break
+        }
+        out
     }
 
     suspend fun recentlyPlayed(): List<SpTrack> = withContext(Dispatchers.IO) {
@@ -149,7 +159,8 @@ class Spotify(private val ctx: Context) {
     suspend fun play(trackUris: List<String>, offset: Int = 0, contextUri: String? = null): String? = withContext(Dispatchers.IO) {
         val body = JSONObject().apply {
             if (contextUri != null) {
-                put("context_uri", contextUri); put("offset", JSONObject().put("position", offset))
+                put("context_uri", contextUri)
+                trackUris.getOrNull(offset)?.let { put("offset", JSONObject().put("uri", it)) }
             } else {
                 put("uris", JSONArray(trackUris.take(100))); put("offset", JSONObject().put("position", offset.coerceAtMost(99)))
             }
