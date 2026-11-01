@@ -18,7 +18,8 @@ import java.security.SecureRandom
 data class SpTrack(val uri: String, val name: String, val artist: String, val image: String?, val durationMs: Long)
 data class SpPlaylist(val id: String, val uri: String, val name: String, val owner: String, val image: String?, val total: Int)
 data class SpNow(val track: SpTrack, val playing: Boolean, val progressMs: Long)
-data class SpUser(val id: String, val name: String, val image: String?, val premium: Boolean)
+/** premium = null cuando Spotify no lo indica (desde feb. 2026 /me ya no devuelve "product"). */
+data class SpUser(val id: String, val name: String, val image: String?, val premium: Boolean?)
 
 /**
  * Integración Spotify vía Web API + OAuth Authorization Code con PKCE (sin client secret).
@@ -118,7 +119,7 @@ class Spotify(private val ctx: Context) {
 
     suspend fun me(): SpUser = withContext(Dispatchers.IO) {
         val j = getJson("/me")
-        SpUser(j.optString("id"), j.optString("display_name", "Spotify"), j.optJSONArray("images").firstImage(), j.optString("product") == "premium")
+        SpUser(j.optString("id"), j.optString("display_name", "Spotify"), j.optJSONArray("images").firstImage(), if (j.has("product")) j.optString("product") == "premium" else null)
     }
 
     /** Canción que suena ahora en la cuenta (cualquier dispositivo). null si no hay nada. */
@@ -161,7 +162,7 @@ class Spotify(private val ctx: Context) {
     }
 
     suspend fun playlistTracks(id: String): List<SpTrack> = withContext(Dispatchers.IO) {
-        getJson("/playlists/$id/tracks?limit=100").getJSONArray("items").objects()
+        getJson("/playlists/$id/items?limit=100").getJSONArray("items").objects()
             .mapNotNull { (it.optJSONObject("track") ?: it.optJSONObject("item"))?.toTrack() }
     }
 

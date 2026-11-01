@@ -467,7 +467,7 @@ fun SettingsDialog(vm: PlayerViewModel, onChangeFolder: () -> Unit, onClose: () 
                     Column(Modifier.weight(1f)) {
                         Text(sp.user?.name ?: "Conectado", color = c.text, fontWeight = FontWeight.SemiBold)
                         Text(
-                            "${sp.liked.size} canciones que te gustan · " + if (sp.user?.premium == true) "Premium" else "Free (se abren en Spotify)",
+                            "${sp.liked.size} canciones que te gustan · " + when (sp.user?.premium) { true -> "Premium"; false -> "Free (se abren en Spotify)"; null -> "control con Premium" },
                             color = c.text2, fontSize = 13.sp
                         )
                     }
@@ -480,7 +480,7 @@ fun SettingsDialog(vm: PlayerViewModel, onChangeFolder: () -> Unit, onClose: () 
             } else {
                 Text(
                     "Escucha tus \"Canciones que te gustan\" de Spotify desde XyonMusic, en el mismo orden que en Spotify.\n\n" +
-                        "1. Crea una app en developer.spotify.com/dashboard\n2. Añade el Redirect URI: ${Spotify.REDIRECT}\n3. Añade tu email en User Management\n4. Pega aquí el Client ID",
+                        "1. Crea una app en developer.spotify.com/dashboard (tu cuenta debe ser Premium, requisito de Spotify desde 2026)\n2. Añade el Redirect URI: ${Spotify.REDIRECT}\n3. Añade tu email en User Management\n4. Pega aquí el Client ID",
                     color = c.text2, fontSize = 13.sp
                 )
                 Spacer(Modifier.height(10.dp))
