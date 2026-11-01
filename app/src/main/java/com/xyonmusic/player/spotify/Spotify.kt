@@ -17,6 +17,7 @@ import java.security.SecureRandom
 
 data class SpTrack(val uri: String, val name: String, val artist: String, val image: String?, val durationMs: Long)
 data class SpPlaylist(val id: String, val uri: String, val name: String, val owner: String, val image: String?, val total: Int)
+data class SpNow(val track: SpTrack, val playing: Boolean, val progressMs: Long)
 data class SpUser(val id: String, val name: String, val image: String?, val premium: Boolean)
 
 /**
@@ -118,6 +119,15 @@ class Spotify(private val ctx: Context) {
     suspend fun me(): SpUser = withContext(Dispatchers.IO) {
         val j = getJson("/me")
         SpUser(j.optString("id"), j.optString("display_name", "Spotify"), j.optJSONArray("images").firstImage(), j.optString("product") == "premium")
+    }
+
+    /** Canción que suena ahora en la cuenta (cualquier dispositivo). null si no hay nada. */
+    suspend fun nowPlaying(): SpNow? = withContext(Dispatchers.IO) {
+        val (code, text) = api("GET", "/me/player/currently-playing")
+        if (code != 200 || text.isBlank()) return@withContext null
+        val j = JSONObject(text)
+        val t = j.optJSONObject("item")?.toTrack() ?: return@withContext null
+        SpNow(t, j.optBoolean("is_playing"), j.optLong("progress_ms"))
     }
 
     suspend fun playlists(): List<SpPlaylist> = withContext(Dispatchers.IO) {

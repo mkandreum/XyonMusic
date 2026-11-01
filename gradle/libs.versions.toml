@@ -10,6 +10,7 @@ media3 = "1.4.1"
 room = "2.6.1"
 datastore = "1.1.1"
 coil = "2.6.0"
+palette = "1.0.0"
 ksp = "2.0.20-1.0.24"
 
 [libraries]
@@ -33,6 +34,7 @@ room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
 room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
 datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
+androidx-palette = { group = "androidx.palette", name = "palette-ktx", version.ref = "palette" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

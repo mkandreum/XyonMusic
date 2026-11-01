@@ -32,6 +32,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.zIndex
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -70,9 +79,11 @@ fun AlbumCoverFlow(
             val norm = (dist / 450f).coerceIn(0f, 1f)
             val scale = 1f - 0.22f * norm
             val alpha = 1f - 0.45f * norm
+            var rect by remember { mutableStateOf<Rect?>(null) }
             Card(
-                onClick = { onAlbumClick(album) },
+                onClick = { ArtOrigin.set(rect); onAlbumClick(album) },
                 modifier = Modifier
+                    .onGloballyPositioned { rect = it.boundsInRoot() }
                     .width(160.dp)
                     .graphicsLayer { scaleX = scale; scaleY = scale; this.alpha = alpha },
                 shape = RoundedCornerShape(16.dp),
@@ -115,6 +126,10 @@ private fun PortraitCoverFlow(albums: List<Album>, onAlbumClick: (Album) -> Unit
             l.visibleItemsInfo.minByOrNull { abs(it.offset + it.size / 2 - c) }?.index ?: 0
         }
     }
+    val haptics = rememberHaptics()
+    LaunchedEffect(listState) {
+        snapshotFlow { centered }.distinctUntilChanged().drop(1).collect { haptics.tick() }
+    }
     BoxWithConstraints(modifier.fillMaxWidth()) {
         val cover = (maxWidth * 0.56f).coerceAtMost(260.dp)
         val side = (maxWidth - cover) / 2
@@ -127,6 +142,7 @@ private fun PortraitCoverFlow(albums: List<Album>, onAlbumClick: (Album) -> Unit
                 modifier = Modifier.fillMaxWidth()
             ) {
                 itemsIndexed(albums, key = { _, a -> a.title + "|" + (a.artist ?: "") }) { i, album ->
+                    var rect by remember { mutableStateOf<Rect?>(null) }
                     Box(
                         Modifier
                             .zIndex(-abs(i - centered).toFloat())
@@ -146,7 +162,8 @@ private fun PortraitCoverFlow(albums: List<Album>, onAlbumClick: (Album) -> Unit
                             .shadow(18.dp, RoundedCornerShape(14.dp))
                             .clip(RoundedCornerShape(14.dp))
                             .background(MaterialTheme.colorScheme.surfaceVariant)
-                            .clickable { onAlbumClick(album) }
+                            .onGloballyPositioned { rect = it.boundsInRoot() }
+                            .clickable { haptics.tap(); ArtOrigin.set(rect); onAlbumClick(album) }
                     ) {
                         AsyncImage(album.artUri, album.title, Modifier.matchParentSize(), contentScale = ContentScale.Crop)
                         // Brillo sutil superior, como el reflejo del CoverFlow original.

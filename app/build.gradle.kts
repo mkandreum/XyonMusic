@@ -20,8 +20,8 @@ android {
         applicationId = "com.xyonmusic.player"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "2.0-ios26"
+        versionCode = 3
+        versionName = "2.0"
 
         vectorDrawables { useSupportLibrary = true }
     }
@@ -75,4 +75,5 @@ dependencies {
     ksp(libs.room.compiler)
     implementation(libs.datastore.preferences)
     implementation(libs.coil.compose)
+    implementation(libs.androidx.palette)
 }

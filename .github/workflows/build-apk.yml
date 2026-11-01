@@ -3,6 +3,7 @@ name: Build release APK (R8)
 on:
   push:
     branches: ["**"]
+    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
@@ -49,7 +50,9 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ github.run_number }}
-          name: XyonMusic build ${{ github.run_number }} (R8)
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}
+          name: ${{ github.ref_type == 'tag' && format('XyonMusic {0}', github.ref_name) || format('XyonMusic build {0} (R8)', github.run_number) }}
+          body_path: ${{ github.ref_type == 'tag' && 'RELEASE_NOTES.md' || '' }}
+          make_latest: ${{ github.ref_type == 'tag' }}
           target_commitish: ${{ github.sha }}
           files: XyonMusic-*-r8.apk

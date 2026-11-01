@@ -35,11 +35,13 @@ class MusicService : MediaSessionService() {
     companion object {
         fun Song.toMediaItem(): MediaItem = MediaItem.Builder()
             .setUri(contentUri)
+            .setMediaId(contentUri.toString())
             .setMediaMetadata(
                 androidx.media3.common.MediaMetadata.Builder()
                     .setTitle(title ?: name)
                     .setArtist(artist)
                     .setAlbumTitle(album)
+                    .setArtworkUri(artUri)
                     .build()
             ).build()
     }
